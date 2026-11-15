@@ -13,10 +13,6 @@ on:
         description: "오늘 이미 수집했어도 다시 수집"
         type: boolean
         default: false
-      import_from:
-        description: "(선택, 처음 한 번만) 과거 기록을 가져올 공개 페이지 주소"
-        type: string
-        default: ""
   push:
     branches: [main]
     paths: ["site/**", "!site/data/**"]
@@ -43,10 +39,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: 과거 기록 가져오기 (선택)
-        if: github.event_name == 'workflow_dispatch' && inputs.import_from != ''
-        run: python collector/import_history.py --base "${{ inputs.import_from }}"
 
       - name: 공개 카운터 수집
         id: collect
