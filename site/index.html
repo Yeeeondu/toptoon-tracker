@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>탑툰챗 트래커</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <p class="eyebrow">TOPTOON CHAT · 공개 카운터</p>
+      <h1 id="title">탑툰챗 트래커</h1>
+    </div>
+    <p class="updated" id="updated">데이터를 불러오는 중…</p>
+  </header>
+
+  <nav class="tabs" id="tabs" aria-label="국가 선택"></nav>
+
+  <div class="controls">
+    <div class="seg" id="metric" role="group" aria-label="지표">
+      <button data-v="view" class="on">View</button>
+      <button data-v="chat">Chat</button>
+    </div>
+    <div class="seg" id="range" role="group" aria-label="기간">
+      <button data-v="30" class="on">30일</button>
+      <button data-v="90">90일</button>
+      <button data-v="0">전체</button>
+    </div>
+  </div>
+
+  <section class="cards" id="cards"></section>
+
+  <section class="grid">
+    <article class="panel"><h2 id="h-daily">일별 순증</h2><p class="sub" id="s-daily"></p><div class="chart" id="c-daily"></div><div class="legend" id="l-daily"></div></article>
+    <article class="panel"><h2 id="h-abs">일별 누적 합계</h2><p class="sub">그날 아침 기준 전체 작품 합계</p><div class="chart" id="c-abs"></div><div class="legend" id="l-abs"></div></article>
+    <article class="panel"><h2 id="h-week">주별 순증</h2><p class="sub">월요일 시작 · 이번 주는 진행 중</p><div class="chart" id="c-week"></div><div class="legend" id="l-week"></div></article>
+    <article class="panel"><h2 id="h-month">월별 순증</h2><p class="sub">이번 달은 진행 중</p><div class="chart" id="c-month"></div><div class="legend" id="l-month"></div></article>
+  </section>
+
+  <section class="panel table-panel">
+    <div class="table-head">
+      <h2>작품별 카운터</h2>
+      <div class="table-tools">
+        <input id="search" type="search" placeholder="작품 이름 검색">
+        <button id="csv" class="ghost">CSV 저장</button>
+      </div>
+    </div>
+    <p class="sub" id="table-sub"></p>
+    <div class="table-scroll"><table id="table"><thead></thead><tbody></tbody></table></div>
+  </section>
+
+  <footer class="foot">공개 페이지에 표시되는 누적 카운터를 매일 아침 기록합니다. 매출이나 실제 이용자 수와는 다릅니다. 순증은 전날과 오늘 모두 있는 작품만 비교하므로, 새로 생긴 작품은 다음 날부터 반영됩니다.</footer>
+</div>
+<div class="tip" id="tip" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
