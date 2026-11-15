@@ -32,13 +32,21 @@ MARKETS = {
     "us": "https://chat.global.toptoon.com",
     "jp": "https://chat.toptoon.jp",
 }
+LANGS = {
+    "kr": "ko-KR,ko;q=0.9",
+    "tw": "zh-TW,zh;q=0.9",
+    "us": "en-US,en;q=0.9",
+    "jp": "ja-JP,ja;q=0.9",
+}
+# 집계 기준: 그날 홈·탐색·랭킹 페이지에 링크로 걸린 작품 (원본 사이트와 같은 기준)
+LISTING_PATHS = ("/", "/explore", "/ranking")
 
 # 이 시각(KST) 이후에 수집된 기록이 있으면 그날은 다시 수집하지 않습니다.
 MORNING_HOUR = 7
 WORKERS = 6
 TIMEOUT = 25
 RETRIES = 3
-# 직전 수집 대비 이 비율 미만으로 성공하면 저장하지 않습니다(사이트 장애 대비).
+# 집계 대상 중 이 비율 미만으로 성공하면 저장하지 않습니다(사이트 장애 대비).
 MIN_SUCCESS_RATIO = 0.6
 
 UA = (
@@ -47,6 +55,7 @@ UA = (
 )
 
 LINK_RE = re.compile(r"detail/(character|content)/(\d+)")
+LISTED_RE = re.compile(r"""(?:href=["']?)/detail/(character|content)/([0-9]+)""", re.I)
 VIEW_RE = re.compile(r'\\?"viewCount\\?":\s*(\d+)')
 CHAT_RE = re.compile(r'\\?"chatCount\\?":\s*(\d+)')
 TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S)
@@ -58,11 +67,12 @@ def log(msg: str) -> None:
     print(msg, flush=True)
 
 
-def fetch(url: str) -> str:
+def fetch(url: str, lang: str = "ko-KR,ko;q=0.9") -> str:
     last: Exception | None = None
     for attempt in range(RETRIES):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "ko,en;q=0.8"})
+            req = urllib.request.Request(url, headers={
+                "User-Agent": UA, "Accept": "text/html,application/xhtml+xml", "Accept-Language": lang})
             with urllib.request.urlopen(req, timeout=TIMEOUT) as res:
                 return res.read().decode("utf-8", "replace")
         except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
@@ -84,14 +94,24 @@ def parse_detail(page: str) -> tuple[str, int, int] | None:
     return name, int(v.group(1)), int(c.group(1))
 
 
-def discover(base: str) -> set[str]:
+def discover_listed(base: str, lang: str) -> set[str]:
+    """그날 홈·탐색·랭킹에 링크로 걸린 작품. 한 페이지라도 실패하면 기준이 달라지므로 오류로 처리."""
     keys: set[str] = set()
-    for path in ("/sitemap.xml", "/", "/explore"):
+    for path in LISTING_PATHS:
+        for kind, item_id in LISTED_RE.findall(fetch(base + path, lang)):
+            keys.add(f"{kind}:{item_id}")
+    return keys
+
+
+def discover_all(base: str, lang: str) -> set[str]:
+    """집계와 별개로 원자료를 넓게 남겨 두기 위한 전체 작품 목록(사이트맵 등)."""
+    keys: set[str] = set()
+    for path in ("/sitemap.xml",):
         try:
-            for kind, item_id in LINK_RE.findall(fetch(base + path)):
+            for kind, item_id in LINK_RE.findall(fetch(base + path, lang)):
                 keys.add(f"{kind}:{item_id}")
         except RuntimeError as exc:
-            log(f"  목록 페이지 실패 {path}: {exc}")
+            log(f"  사이트맵 실패: {exc}")
     return keys
 
 
@@ -128,15 +148,20 @@ def collect_market(market: str, force: bool) -> bool:
         log(f"[{market}] 오늘 아침 수집이 이미 있어 건너뜁니다.")
         return True
 
-    keys = discover(base)
-    prev = data["days"][-1]["items"] if data["days"] else {}
-    keys |= set(prev)  # 목록에서 빠진 작품도 계속 추적
-    log(f"[{market}] 대상 {len(keys)}개 수집 시작")
+    lang = LANGS[market]
+    listed = discover_listed(base, lang)
+    if not listed:
+        log(f"[{market}] 홈·탐색·랭킹에서 작품 링크를 찾지 못해 저장하지 않습니다.")
+        return False
+    prev_day = data["days"][-1] if data["days"] else None
+    prev = prev_day["items"] if prev_day else {}
+    keys = listed | discover_all(base, lang) | set(prev)
+    log(f"[{market}] 집계 대상 {len(listed)}개, 원자료 {len(keys)}개 수집 시작")
 
     def work(key: str):
         kind, item_id = key.split(":")
         try:
-            return key, parse_detail(fetch(f"{base}/detail/{kind}/{item_id}"))
+            return key, parse_detail(fetch(f"{base}/detail/{kind}/{item_id}", lang))
         except RuntimeError:
             return key, None
 
@@ -149,9 +174,9 @@ def collect_market(market: str, force: bool) -> bool:
                     name = prev[key][0]
                 items[key] = [name, view, chat]
 
-    expected = max(10, int(len([k for k in prev]) * MIN_SUCCESS_RATIO))
-    if len(items) < expected:
-        log(f"[{market}] 성공 {len(items)}개로 너무 적어 저장하지 않습니다(기준 {expected}개).")
+    counted = sorted(k for k in listed if k in items)
+    if len(counted) < max(5, int(len(listed) * MIN_SUCCESS_RATIO)):
+        log(f"[{market}] 집계 대상 {len(listed)}개 중 {len(counted)}개만 성공해 저장하지 않습니다.")
         return False
 
     data["days"] = [d for d in data["days"] if d["date"] != today]
@@ -159,10 +184,11 @@ def collect_market(market: str, force: bool) -> bool:
         "date": today,
         "captured_at": now.isoformat(timespec="seconds"),
         "items": items,
+        "listed": counted,
     })
     save(market, data)
-    log(f"[{market}] 저장 완료: {len(items)}개 (View {sum(v[1] for v in items.values()):,}, "
-        f"Chat {sum(v[2] for v in items.values()):,})")
+    log(f"[{market}] 저장 완료: 집계 {len(counted)}개 (View {sum(items[k][1] for k in counted):,}, "
+        f"Chat {sum(items[k][2] for k in counted):,}), 원자료 {len(items)}개")
     return True
 
 
