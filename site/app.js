@@ -7,8 +7,8 @@ const MARKETS = [
   { id: "us", name: "미국", color: "--s3" },
   { id: "jp", name: "일본", color: "--s4" },
 ];
-// 원본 사이트의 과거 수치가 실제 페이지 값과 맞지 않아 과거 기록을 쓰지 않는 나라
-const SKIP_IMPORTED = new Set(["us"]);
+// 원본 사이트가 숫자를 잘못 읽은 작품이 많아 과거 기록을 쓰지 않는 나라
+const SKIP_IMPORTED = new Set(["tw", "us"]);
 const TABS = [{ id: "all", name: "종합" }, ...MARKETS];
 const REFRESH_MS = 10 * 60 * 1000;
 
@@ -39,36 +39,17 @@ const kstToday = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 // ───────── 데이터 ─────────
-// 절대값 시리즈:
-//  - 직접 수집한 날은 그날 전체 작품의 실제 합계
-//  - 그 이전(원본 기록) 구간은 첫 직접 수집 합계에서 하루씩 거꾸로,
-//    '이틀 모두 있는 작품'의 증가분을 빼서 이어 붙인 추정값
+// 집계 기준(원본 사이트와 동일): 그날 홈·탐색·랭킹 페이지에 링크로 걸린 작품의 합계.
+// 직접 수집한 날은 day.listed에 그 목록이 있고, 원본에서 가져온 날은 기록된 작품 전부가 그 목록입니다.
+const counted = day => day.listed || Object.keys(day.items);
 function prepare(raw, id) {
   let days = (raw.days || []).slice().sort((a, b) => a.date.localeCompare(b.date));
   if (SKIP_IMPORTED.has(id)) days = days.filter(d => !d.imported);
-  const n = days.length;
-  const actual = days.map(d => {
+  const abs = days.map(d => {
     let v = 0, c = 0;
-    for (const it of Object.values(d.items)) { v += it[1]; c += it[2]; }
+    for (const k of counted(d)) { const it = d.items[k]; if (it) { v += it[1]; c += it[2]; } }
     return { view: v, chat: c };
   });
-  const gain = days.map((d, i) => {
-    if (!i) return null;
-    const prev = days[i - 1].items;
-    let v = 0, c = 0;
-    for (const [k, it] of Object.entries(d.items)) {
-      const p = prev[k];
-      if (p) { v += Math.max(0, it[1] - p[1]); c += Math.max(0, it[2] - p[2]); }
-    }
-    return { view: v, chat: c };
-  });
-  let first = days.findIndex(d => !d.imported);
-  if (first < 0) first = n - 1;
-  const abs = new Array(n);
-  for (let i = n - 1; i >= 0; i--) {
-    if (i >= first) abs[i] = { ...actual[i], est: false };
-    else abs[i] = { view: abs[i + 1].view - gain[i + 1].view, chat: abs[i + 1].chat - gain[i + 1].chat, est: true };
-  }
   return { source: raw.source, days, abs };
 }
 
@@ -132,16 +113,9 @@ function drawCountry(card, m) {
       svg += `<text x="${pad.l - 6}" y="${y(t) + 4}" text-anchor="end">${short(t)}</text>`;
     }
     svg += `</g>`;
-    // 점선(추정) → 실선(실제)
-    const pts = sel.map((i, k) => [x(k), y(d.abs[i][p.key]), d.abs[i].est]);
-    const lastEst = pts.map(q => q[2]).lastIndexOf(true);
-    const path = arr => arr.map((q, j) => (j ? "L" : "M") + q[0].toFixed(1) + "," + q[1].toFixed(1)).join("");
-    if (lastEst >= 0) {
-      const estPts = pts.slice(0, Math.min(pts.length, lastEst + 2));
-      svg += `<path d="${path(estPts)}" fill="none" stroke="${color}" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>`;
-    }
-    const realPts = pts.slice(Math.max(0, lastEst + 1));
-    if (realPts.length > 1) svg += `<path d="${path(realPts)}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const pts = sel.map((i, k) => [x(k), y(d.abs[i][p.key])]);
+    const path = pts.map((q, j) => (j ? "L" : "M") + q[0].toFixed(1) + "," + q[1].toFixed(1)).join("");
+    if (pts.length > 1) svg += `<path d="${path}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
     const last = pts[pts.length - 1];
     svg += `<circle cx="${last[0]}" cy="${last[1]}" r="4" fill="${color}" stroke="${surface}" stroke-width="2"/>`;
     svg += `<text class="endlabel" x="${last[0] + 8}" y="${last[1] + 4}">${short(vals[vals.length - 1])}</text>`;
@@ -167,7 +141,7 @@ function drawCountry(card, m) {
     const i = sel[k], a = d.abs[i], prev = i > 0 ? d.abs[i - 1] : null;
     cross.setAttribute("x1", x(k)); cross.setAttribute("x2", x(k)); cross.setAttribute("visibility", "visible");
     const delta = key => (prev ? ` <em>${signed(a[key] - prev[key])}</em>` : "");
-    tip.innerHTML = `<b>${m.name} · ${d.days[i].date}${a.est ? " (추정)" : ""}</b>` +
+    tip.innerHTML = `<b>${m.name} · ${d.days[i].date} · ${counted(d.days[i]).length}개 작품</b>` +
       `<div class="row"><span>View</span><span>${fmt(a.view)}${delta("view")}</span></div>` +
       `<div class="row"><span>Chat</span><span>${fmt(a.chat)}${delta("chat")}</span></div>`;
     tip.hidden = false;
@@ -183,8 +157,8 @@ function renderAll() {
     const d = state.data[m.id], n = d.days.length;
     const cur = n ? d.abs[n - 1] : null, prev = n > 1 ? d.abs[n - 2] : null;
     const stat = (k, label) => `<div class="stat"><span class="k">${label}</span><span class="v">${fmt(cur?.[k])}</span>` +
-      `<span class="d">${prev ? signed(cur[k] - prev[k]) : ""}</span></div>`;
-    const note = SKIP_IMPORTED.has(m.id) ? `<p class="sub">원본 과거 기록이 실제 페이지 값과 달라 직접 수집한 날부터 표시</p>` : "";
+      `<span class="d${prev && cur[k] < prev[k] ? " down" : ""}">${prev ? signed(cur[k] - prev[k]) : ""}</span></div>`;
+    const note = SKIP_IMPORTED.has(m.id) ? `<p class="sub">원본 사이트의 과거 기록은 숫자를 잘못 읽은 작품이 많아, 직접 수집한 날부터 표시</p>` : "";
     return `<article class="panel country" data-id="${m.id}">
       <div class="chead"><h2><i style="background:var(${m.color})"></i>${m.name}</h2>
         <div class="stats">${stat("view", "View")}${stat("chat", "Chat")}</div></div>
@@ -208,7 +182,9 @@ function currentRows() {
   const rows = [];
   if (i >= 0) {
     const cur = d.days[i].items, prev = i > 0 ? d.days[i - 1].items : {};
-    for (const [key, [name, view, chat]] of Object.entries(cur)) {
+    for (const key of counted(d.days[i])) {
+      if (!cur[key]) continue;
+      const [name, view, chat] = cur[key];
       const [kind, id] = key.split(":");
       const p = prev[key];
       rows.push({
