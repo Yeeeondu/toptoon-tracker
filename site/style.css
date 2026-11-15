@@ -142,3 +142,4 @@ select { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-
 tr.total td { font-weight: 700; background: var(--bg); position: sticky; top: 37px; }
 
 @media (max-width: 900px) { .countries { grid-template-columns: 1fr; } }
+.stat .d.down { color: var(--down); }
