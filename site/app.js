@@ -7,14 +7,12 @@ const MARKETS = [
   { id: "us", name: "미국", color: "--s3" },
   { id: "jp", name: "일본", color: "--s4" },
 ];
-// 원본 사이트가 숫자를 잘못 읽은 작품이 많아 과거 기록을 쓰지 않는 나라
-const SKIP_IMPORTED = new Set(["tw", "us"]);
 const TABS = [{ id: "all", name: "종합" }, ...MARKETS];
 const REFRESH_MS = 10 * 60 * 1000;
 
 const state = {
   market: new URLSearchParams(location.search).get("market") || "all",
-  range: 30,
+  range: 0, // 0 = 전체(첫 수집일부터)
   search: "",
   date: null,
   sort: null,
@@ -35,16 +33,16 @@ function short(n) {
   return nf.format(n);
 }
 const md = d => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
+// 여러 해에 걸치면 연도도 표시
+const mdy = (d, multiYear) => (multiYear ? `${d.slice(2, 4)}.` : "") + md(d);
 const kstToday = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 // ───────── 데이터 ─────────
-// 집계 기준(원본 사이트와 동일): 그날 홈·탐색·랭킹 페이지에 링크로 걸린 작품의 합계.
-// 직접 수집한 날은 day.listed에 그 목록이 있고, 원본에서 가져온 날은 기록된 작품 전부가 그 목록입니다.
-const counted = day => day.listed || Object.keys(day.items);
+// 집계 기준: 매일 사이트에 공개된 전체 작품(캐릭터·작품)의 합계. 직접 수집한 날만 사용합니다.
+const counted = day => Object.keys(day.items);
 function prepare(raw, id) {
-  let days = (raw.days || []).slice().sort((a, b) => a.date.localeCompare(b.date));
-  if (SKIP_IMPORTED.has(id)) days = days.filter(d => !d.imported);
+  const days = (raw.days || []).filter(d => !d.imported).sort((a, b) => a.date.localeCompare(b.date));
   const abs = days.map(d => {
     let v = 0, c = 0;
     for (const k of counted(d)) { const it = d.items[k]; if (it) { v += it[1]; c += it[2]; } }
@@ -122,10 +120,11 @@ function drawCountry(card, m) {
   }
   // 날짜 축
   const every = Math.max(1, Math.ceil(sel.length / Math.max(2, Math.floor(iw / 70))));
+  const multiYear = sel.length && d.days[sel[0]].date.slice(0, 4) !== d.days[sel[sel.length - 1]].date.slice(0, 4);
   svg += `<g class="axis">`;
   sel.forEach((i, k) => {
     if (k % every === 0 || k === sel.length - 1)
-      svg += `<text x="${x(k)}" y="${H - 4}" text-anchor="middle">${md(d.days[i].date)}</text>`;
+      svg += `<text x="${x(k)}" y="${H - 4}" text-anchor="middle">${mdy(d.days[i].date, multiYear)}</text>`;
   });
   svg += `</g>`;
   svg += `<line class="cross" x1="0" x2="0" y1="${pad.t}" y2="${H - pad.b}" visibility="hidden"/>`;
@@ -158,11 +157,10 @@ function renderAll() {
     const cur = n ? d.abs[n - 1] : null, prev = n > 1 ? d.abs[n - 2] : null;
     const stat = (k, label) => `<div class="stat"><span class="k">${label}</span><span class="v">${fmt(cur?.[k])}</span>` +
       `<span class="d${prev && cur[k] < prev[k] ? " down" : ""}">${prev ? signed(cur[k] - prev[k]) : ""}</span></div>`;
-    const note = SKIP_IMPORTED.has(m.id) ? `<p class="sub">원본 사이트의 과거 기록은 숫자를 잘못 읽은 작품이 많아, 직접 수집한 날부터 표시</p>` : "";
     return `<article class="panel country" data-id="${m.id}">
       <div class="chead"><h2><i style="background:var(${m.color})"></i>${m.name}</h2>
         <div class="stats">${stat("view", "View")}${stat("chat", "Chat")}</div></div>
-      ${note}<div class="plot"></div></article>`;
+      <div class="plot"></div></article>`;
   }).join("");
   box.querySelectorAll(".country").forEach(card => drawCountry(card, MARKETS.find(m => m.id === card.dataset.id)));
 }
@@ -231,7 +229,7 @@ function renderTable() {
     `<td class="${cls(r.dview)}">${signed(r.dview)}</td><td class="${cls(r.dchat)}">${signed(r.dchat)}</td></tr>`).join("")
     || `<tr><td colspan="7" class="l zero">표시할 작품이 없습니다</td></tr>`);
   $("#table-sub").textContent = day
-    ? `${day.imported ? "원본 사이트 기록" : "직접 수집"} · ${new Date(day.captured_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} 기준 · 증감은 직전 수집 대비 · 제목을 누르면 정렬`
+    ? `${new Date(day.captured_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} 기준 · 증감은 직전 수집 대비 · 제목을 누르면 정렬`
     : "";
 }
 
