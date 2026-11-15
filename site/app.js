@@ -108,9 +108,9 @@ function drawCountry(card, m) {
     p.y = y;
     svg += `<text class="plabel" x="${pad.l}" y="${p.top - 8}">${p.label}</text>`;
     svg += `<g class="axis">`;
-    for (const t of ticks) {
+    const tl = ticks.map(short), lab = new Set(tl).size < tl.length ? ticks.map(fmt) : tl; for (const [ti, t] of ticks.entries()) {
       svg += `<line class="gridline" x1="${pad.l}" x2="${W - pad.r}" y1="${y(t)}" y2="${y(t)}"/>`;
-      svg += `<text x="${pad.l - 6}" y="${y(t) + 4}" text-anchor="end">${short(t)}</text>`;
+      svg += `<text x="${pad.l - 6}" y="${y(t) + 4}" text-anchor="end">${lab[ti]}</text>`;
     }
     svg += `</g>`;
     const pts = sel.map((i, k) => [x(k), y(d.abs[i][p.key])]);
