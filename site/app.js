@@ -54,7 +54,7 @@ function prepare(raw) {
     let v = 0, c = 0;
     for (const it of Object.values(day.items)) { v += it[1]; c += it[2]; }
     totals.set(day.date, { view: v, chat: c });
-    if (i > 0) {
+    if (i > 0 && !(days[i - 1].imported && !day.imported)) {
       const prev = days[i - 1].items;
       let gv = 0, gc = 0;
       for (const [k, it] of Object.entries(day.items)) {
