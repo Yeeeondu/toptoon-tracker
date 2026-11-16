@@ -51,6 +51,17 @@ function prepare(raw, id) {
   return { source: raw.source, days, abs };
 }
 
+// 순증: 직전 수집과의 차이를 24시간 기준으로 환산(수집 시각이 밀려도 같은 잣대로 비교)
+const MIN_GAP_H = 6; // 이보다 짧은 간격은 환산 오차가 커서 순증을 표시하지 않음
+function gainAt(d, i, key) {
+  if (i <= 0) return null;
+  const hours = (new Date(d.days[i].captured_at) - new Date(d.days[i - 1].captured_at)) / 3600e3;
+  const raw = d.abs[i][key] - d.abs[i - 1][key];
+  if (!(hours >= MIN_GAP_H)) return { raw, hours, norm: null };
+  return { raw, hours, norm: Math.round(raw * 24 / hours) };
+}
+const hrs = h => (h >= 47.5 ? `${(h / 24).toFixed(1)}일` : `${Math.round(h)}시간`);
+
 async function loadAll() {
   const bust = "?t=" + Math.floor(Date.now() / 60000);
   const results = await Promise.all(MARKETS.map(async m => {
@@ -122,7 +133,7 @@ function drawCountry(card, m) {
 
     // 막대: 그날 순증(직전 수집 대비 합계 변화)
     const bTop = p.top + lh + barGap;
-    const gains = sel.map(i => (i > 0 ? d.abs[i][p.key] - d.abs[i - 1][p.key] : null));
+    const gains = sel.map(i => gainAt(d, i, p.key)?.norm ?? null);
     const gv = gains.filter(v => v != null);
     const gLo = Math.min(0, ...gv), gHi = Math.max(0, ...gv, 1);
     const by = v => bTop + barH - ((v - gLo) / (gHi - gLo || 1)) * barH;
@@ -140,7 +151,7 @@ function drawCountry(card, m) {
     });
     svg += `<line class="baseline" x1="${pad.l}" x2="${W - pad.r}" y1="${by(0)}" y2="${by(0)}"/>`;
     const lastG = gains[gains.length - 1];
-    svg += `<text class="gainlabel" x="${W - pad.r + 8}" y="${by(gHi) + 10}">일 순증</text>`;
+    svg += `<text class="gainlabel" x="${W - pad.r + 8}" y="${by(gHi) + 10}">일 순증(24h)</text>`;
     if (lastG != null) svg += `<text class="endlabel" x="${W - pad.r + 8}" y="${by(gHi) + 26}">${(lastG > 0 ? "+" : "") + short(lastG)}</text>`;
   }
   // 날짜 축
@@ -162,12 +173,14 @@ function drawCountry(card, m) {
     const r = s.getBoundingClientRect();
     const px = (e.clientX - r.left) * (W / r.width);
     const k = Math.max(0, Math.min(sel.length - 1, Math.round((px - pad.l) / (step || 1))));
-    const i = sel[k], a = d.abs[i], prev = i > 0 ? d.abs[i - 1] : null;
+    const i = sel[k], a = d.abs[i];
     cross.setAttribute("x1", x(k)); cross.setAttribute("x2", x(k)); cross.setAttribute("visibility", "visible");
-    const delta = key => (prev ? ` <em>순증 ${signed(a[key] - prev[key])}</em>` : "");
-    tip.innerHTML = `<b>${m.name} · ${d.days[i].date} · ${counted(d.days[i]).length}개 작품</b>` +
-      `<div class="row"><span>View</span><span>${fmt(a.view)}${delta("view")}</span></div>` +
-      `<div class="row"><span>Chat</span><span>${fmt(a.chat)}${delta("chat")}</span></div>`;
+    const g = { view: gainAt(d, i, "view"), chat: gainAt(d, i, "chat") };
+    const capt = new Date(d.days[i].captured_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    const row = (key, label) => `<div class="row"><span>${label}</span><span>${fmt(a[key])}</span></div>` +
+      (g[key] ? `<div class="row sub"><span>순증(24h 환산)</span><span>${g[key].norm == null ? "—" : signed(g[key].norm)}</span></div>` +
+        `<div class="row sub"><span>실제 증가 · ${hrs(g[key].hours)}</span><span>${signed(g[key].raw)}</span></div>` : "");
+    tip.innerHTML = `<b>${m.name} · ${capt} 수집 · ${counted(d.days[i]).length}개 작품</b>` + row("view", "View") + row("chat", "Chat");
     tip.hidden = false;
     tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px";
     tip.style.top = e.clientY + 14 + "px";
@@ -179,9 +192,13 @@ function renderAll() {
   const box = $("#countries");
   box.innerHTML = MARKETS.map(m => {
     const d = state.data[m.id], n = d.days.length;
-    const cur = n ? d.abs[n - 1] : null, prev = n > 1 ? d.abs[n - 2] : null;
-    const stat = (k, label) => `<div class="stat"><span class="k">${label}</span><span class="v">${fmt(cur?.[k])}</span>` +
-      `<span class="d${prev && cur[k] < prev[k] ? " down" : ""}">${prev ? signed(cur[k] - prev[k]) : ""}</span></div>`;
+    const cur = n ? d.abs[n - 1] : null;
+    const stat = (k, label) => {
+      const g = gainAt(d, n - 1, k), v = g?.norm;
+      const tipText = g ? `실제 ${signed(g.raw)} (${hrs(g.hours)} 동안)` : "";
+      return `<div class="stat"><span class="k">${label}</span><span class="v">${fmt(cur?.[k])}</span>` +
+        `<span class="d${v != null && v < 0 ? " down" : ""}" title="${tipText}">${v != null ? signed(v) + " /24h" : ""}</span></div>`;
+    };
     return `<article class="panel country" data-id="${m.id}">
       <div class="chead"><h2><i style="background:var(${m.color})"></i>${m.name}</h2>
         <div class="stats">${stat("view", "View")}${stat("chat", "Chat")}</div></div>
@@ -241,6 +258,7 @@ const COLS = [
 
 function renderTable() {
   const { rows, shown, sort, day } = currentRows();
+  const d = state.data[state.market];
   $("#table thead").innerHTML = "<tr>" + COLS.map(c =>
     `<th class="${c.l ? "l" : ""}" data-key="${c.key}">${c.label}<span class="arrow">${sort.key === c.key ? (sort.dir < 0 ? " ▼" : " ▲") : ""}</span></th>`).join("") + "</tr>";
   const sum = k => rows.reduce((a, r) => a + (r[k] || 0), 0);
@@ -254,7 +272,8 @@ function renderTable() {
     `<td class="${cls(r.dview)}">${signed(r.dview)}</td><td class="${cls(r.dchat)}">${signed(r.dchat)}</td></tr>`).join("")
     || `<tr><td colspan="7" class="l zero">표시할 작품이 없습니다</td></tr>`);
   $("#table-sub").textContent = day
-    ? `${new Date(day.captured_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} 기준 · 증감은 직전 수집 대비 · 제목을 누르면 정렬`
+    ? `${new Date(day.captured_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} 기준 · 증감은 직전 수집 대비 실제 증가` +
+      (gainAt(d, d.days.indexOf(day), "view") ? ` (${hrs(gainAt(d, d.days.indexOf(day), "view").hours)} 간격)` : "") + " · 제목을 누르면 정렬"
     : "";
 }
 
