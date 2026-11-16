@@ -85,9 +85,11 @@ function drawCountry(card, m) {
   if (!sel.length) { body.innerHTML = `<div class="empty">아직 수집된 데이터가 없습니다</div>`; return; }
 
   const color = css(m.color);
-  const W = body.clientWidth || 520, H = 300;
-  const pad = { l: 52, r: 84, t: 22, b: 22, gap: 34 };
+  const W = body.clientWidth || 520, H = body.clientHeight || 420;
+  // 각 지표 칸 = 위쪽 선(누적 절대값) + 아래쪽 막대 띠(그날 순증)
+  const pad = { l: 52, r: 84, t: 22, b: 22, gap: 34 }, barH = 50, barGap = 18;
   const ph = (H - pad.t - pad.b - pad.gap) / 2;
+  const lh = ph - barH - barGap;
   const iw = W - pad.l - pad.r;
   const step = sel.length > 1 ? iw / (sel.length - 1) : 0;
   const x = k => pad.l + (sel.length > 1 ? step * k : iw / 2);
@@ -96,14 +98,14 @@ function drawCountry(card, m) {
     { key: "chat", label: "Chat", top: pad.t + ph + pad.gap },
   ];
   const surface = css("--surface");
-  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${m.name} View·Chat 절대값">`;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${m.name} View·Chat 절대값과 일별 순증">`;
 
   for (const p of panels) {
+    // 선: 누적 절대값
     const vals = sel.map(i => d.abs[i][p.key]);
     const ticks = niceTicks(Math.min(...vals), Math.max(...vals));
     const lo = ticks[0], hi = ticks[ticks.length - 1];
-    const y = v => p.top + ph - ((v - lo) / (hi - lo || 1)) * ph;
-    p.y = y;
+    const y = v => p.top + lh - ((v - lo) / (hi - lo || 1)) * lh;
     svg += `<text class="plabel" x="${pad.l}" y="${p.top - 8}">${p.label}</text>`;
     svg += `<g class="axis">`;
     const tl = ticks.map(short), lab = new Set(tl).size < tl.length ? ticks.map(fmt) : tl; for (const [ti, t] of ticks.entries()) {
@@ -117,6 +119,29 @@ function drawCountry(card, m) {
     const last = pts[pts.length - 1];
     svg += `<circle cx="${last[0]}" cy="${last[1]}" r="4" fill="${color}" stroke="${surface}" stroke-width="2"/>`;
     svg += `<text class="endlabel" x="${last[0] + 8}" y="${last[1] + 4}">${short(vals[vals.length - 1])}</text>`;
+
+    // 막대: 그날 순증(직전 수집 대비 합계 변화)
+    const bTop = p.top + lh + barGap;
+    const gains = sel.map(i => (i > 0 ? d.abs[i][p.key] - d.abs[i - 1][p.key] : null));
+    const gv = gains.filter(v => v != null);
+    const gLo = Math.min(0, ...gv), gHi = Math.max(0, ...gv, 1);
+    const by = v => bTop + barH - ((v - gLo) / (gHi - gLo || 1)) * barH;
+    svg += `<line class="gridline" x1="${pad.l}" x2="${W - pad.r}" y1="${by(gHi)}" y2="${by(gHi)}"/>`;
+    svg += `<g class="axis"><text x="${pad.l - 6}" y="${by(gHi) + 4}" text-anchor="end">${gv.length ? short(gHi) : ""}</text>`;
+    svg += `<text x="${pad.l - 6}" y="${by(0) + 4}" text-anchor="end">0</text></g>`;
+    const bw = Math.max(2, Math.min(14, (sel.length > 1 ? step : iw) * 0.6));
+    gains.forEach((g, k) => {
+      if (g == null || g === 0) return;
+      const y0 = by(0), y1 = by(g), h = Math.abs(y0 - y1), top = Math.min(y0, y1), r = Math.min(3, h / 2, bw / 2);
+      const x0 = x(k) - bw / 2;
+      svg += g > 0
+        ? `<path class="gainbar" d="M${x0},${y0}V${top + r}Q${x0},${top} ${x0 + r},${top}H${x0 + bw - r}Q${x0 + bw},${top} ${x0 + bw},${top + r}V${y0}Z" fill="${color}"/>`
+        : `<rect class="gainbar" x="${x0}" y="${top}" width="${bw}" height="${h}" fill="${css("--down")}"/>`;
+    });
+    svg += `<line class="baseline" x1="${pad.l}" x2="${W - pad.r}" y1="${by(0)}" y2="${by(0)}"/>`;
+    const lastG = gains[gains.length - 1];
+    svg += `<text class="gainlabel" x="${W - pad.r + 8}" y="${by(gHi) + 10}">일 순증</text>`;
+    if (lastG != null) svg += `<text class="endlabel" x="${W - pad.r + 8}" y="${by(gHi) + 26}">${(lastG > 0 ? "+" : "") + short(lastG)}</text>`;
   }
   // 날짜 축
   const every = Math.max(1, Math.ceil(sel.length / Math.max(2, Math.floor(iw / 70))));
@@ -139,7 +164,7 @@ function drawCountry(card, m) {
     const k = Math.max(0, Math.min(sel.length - 1, Math.round((px - pad.l) / (step || 1))));
     const i = sel[k], a = d.abs[i], prev = i > 0 ? d.abs[i - 1] : null;
     cross.setAttribute("x1", x(k)); cross.setAttribute("x2", x(k)); cross.setAttribute("visibility", "visible");
-    const delta = key => (prev ? ` <em>${signed(a[key] - prev[key])}</em>` : "");
+    const delta = key => (prev ? ` <em>순증 ${signed(a[key] - prev[key])}</em>` : "");
     tip.innerHTML = `<b>${m.name} · ${d.days[i].date} · ${counted(d.days[i]).length}개 작품</b>` +
       `<div class="row"><span>View</span><span>${fmt(a.view)}${delta("view")}</span></div>` +
       `<div class="row"><span>Chat</span><span>${fmt(a.chat)}${delta("chat")}</span></div>`;
