@@ -65,6 +65,9 @@ jobs:
           git pull --rebase origin main
           git push origin HEAD:main
 
+      - name: 캐시 무효화용 버전 표시
+        run: sed -i "s/__V__/${{ github.sha }}/g" site/index.html
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
