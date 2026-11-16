@@ -151,7 +151,6 @@ function drawCountry(card, m) {
     });
     svg += `<line class="baseline" x1="${pad.l}" x2="${W - pad.r}" y1="${by(0)}" y2="${by(0)}"/>`;
     const lastG = gains[gains.length - 1];
-    svg += `<text class="gainlabel" x="${W - pad.r + 8}" y="${by(gHi) + 10}">일 순증(24h)</text>`;
     if (lastG != null) svg += `<text class="endlabel" x="${W - pad.r + 8}" y="${by(gHi) + 26}">${(lastG > 0 ? "+" : "") + short(lastG)}</text>`;
   }
   // 날짜 축
@@ -197,7 +196,7 @@ function renderAll() {
       const g = gainAt(d, n - 1, k), v = g?.norm;
       const tipText = g ? `실제 ${signed(g.raw)} (${hrs(g.hours)} 동안)` : "";
       return `<div class="stat"><span class="k">${label}</span><span class="v">${fmt(cur?.[k])}</span>` +
-        `<span class="d${v != null && v < 0 ? " down" : ""}" title="${tipText}">${v != null ? signed(v) + " /24h" : ""}</span></div>`;
+        `<span class="d${v != null && v < 0 ? " down" : ""}" title="${tipText}">${v != null ? signed(v) : ""}</span></div>`;
     };
     return `<article class="panel country" data-id="${m.id}">
       <div class="chead"><h2><i style="background:var(${m.color})"></i>${m.name}</h2>
