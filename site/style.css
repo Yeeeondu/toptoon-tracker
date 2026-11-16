@@ -127,7 +127,7 @@ td.name { white-space: normal; min-width: 180px; }
 .stat .k { font-size: 11px; color: var(--muted); font-weight: 600; }
 .stat .v { font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
 .stat .d { font-size: 12px; color: var(--up); min-height: 16px; }
-.plot { height: 300px; margin-top: 6px; position: relative; }
+.plot { height: 420px; margin-top: 6px; position: relative; }
 .plot svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .plot .empty { height: 100%; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
 .plabel { fill: var(--text-2); font-size: 12px; font-weight: 600; }
@@ -143,3 +143,5 @@ tr.total td { font-weight: 700; background: var(--bg); position: sticky; top: 37
 
 @media (max-width: 900px) { .countries { grid-template-columns: 1fr; } }
 .stat .d.down { color: var(--down); }
+.gainbar { opacity: .55; }
+.gainlabel { fill: var(--muted); font-size: 11px; }
