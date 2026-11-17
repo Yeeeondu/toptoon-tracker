@@ -34,6 +34,24 @@
 
   <!-- 국가 탭: 합계를 만드는 작품별 원자료 -->
   <section id="view-market" hidden>
+    <article class="panel items-panel">
+      <div class="phead">
+        <div><h2>캐릭터·작품별 추이</h2><p class="sub" id="items-sub"></p></div>
+        <div class="ctrls">
+          <div class="seg" id="imetric" role="group" aria-label="지표">
+            <button data-v="chat" class="on">Chat</button>
+            <button data-v="view">View</button>
+          </div>
+          <div class="seg" id="imode" role="group" aria-label="보기">
+            <button data-v="abs" class="on">누적</button>
+            <button data-v="gain">일 순증</button>
+            <button data-v="share">순증 점유율</button>
+          </div>
+        </div>
+      </div>
+      <div class="plot items-plot" id="plot-items"></div>
+      <div class="legend" id="items-legend"></div>
+    </article>
     <section class="panel table-panel">
       <div class="table-head">
         <div class="table-title">
