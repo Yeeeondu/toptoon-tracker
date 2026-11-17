@@ -275,6 +275,8 @@ function drawItems() {
   }
   labels.sort((a, b) => a.y - b.y);
   for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 13) labels[i].y = labels[i - 1].y + 13;
+  const maxY = H - pad.b - 2;
+  if (labels.length && labels.at(-1).y > maxY) { labels.at(-1).y = maxY; for (let i = labels.length - 2; i >= 0; i--) labels[i].y = Math.min(labels[i].y, labels[i + 1].y - 13); }
   for (const l of labels) svg += `<text class="endlabel" x="${W - pad.r + 8}" y="${l.y + 4}" style="fill:${l.color}">${l.text}</text>`;
   svg += `<line class="cross" x1="0" x2="0" y1="${pad.t}" y2="${H - pad.b}" visibility="hidden"/>`;
   svg += `<rect class="hit" x="${pad.l - step / 2}" y="${pad.t}" width="${iw + step}" height="${ph}"/></svg>`;
