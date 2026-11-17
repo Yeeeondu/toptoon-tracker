@@ -11,6 +11,7 @@
   --up: #008300;
   --down: #e34948;
   --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --s5: #8b5cd6; --s6: #d9477f; --s7: #6b6a66;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -26,6 +27,7 @@
     --up: #0ca30c;
     --down: #e66767;
     --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --s5: #9a70e0; --s6: #e05c8e; --s7: #9a9993;
   }
 }
 * { box-sizing: border-box; }
@@ -147,3 +149,9 @@ tr.total td { font-weight: 700; background: var(--bg); position: sticky; top: 37
 .gainlabel { fill: var(--muted); font-size: 11px; }
 .tip .row.sub { font-size: 11px; color: var(--muted); }
 .tip .row.sub span:last-child { color: var(--text-2); font-weight: 500; }
+/* 국가 탭: 캐릭터·작품별 추이 */
+.items-panel { margin-bottom: 12px; }
+.phead { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.ctrls { display: flex; gap: 8px; flex-wrap: wrap; }
+.items-plot { height: 380px; }
+.legend small { color: var(--muted); font-size: 11px; }
