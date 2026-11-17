@@ -20,10 +20,25 @@ const state = {
   imetric: "chat", // 국가 탭 캐릭터·작품별 그래프 지표
   imode: "abs",    // abs 누적 / gain 일 순증 / share 순증 점유율
 };
-// 일본·대만·미국 이름 옆 한국어 번역 (ko.js)
-const koName = (m, key, name) => { const t = window.KO?.[m]?.[key]; return t && t !== name ? `${name} (${t})` : name; };
-const PALETTE = ["--s1", "--s2", "--s3", "--s4", "--s5", "--s6", "--s7"];
-const TOP_N = PALETTE.length;
+// 일본·대만·미국 이름 옆 괄호: 캐릭터는 같은 번호의 한국판 이름, 한국판이 없으면 번역(ko.js)
+let krNameCache = null;
+function krName(key) {
+  const days = state.data.kr?.days || [];
+  if (!krNameCache || krNameCache.n !== days.length) {
+    const map = {};
+    for (const day of days) for (const [k, v] of Object.entries(day.items)) if (v[0]) map[k] = v[0];
+    krNameCache = { n: days.length, map };
+  }
+  return krNameCache.map[key];
+}
+const koName = (m, key, name) => {
+  if (m === "kr") return name;
+  const t = (key.startsWith("character:") && krName(key)) || window.KO?.[m]?.[key];
+  return t && t !== name ? `${name} (${t})` : name;
+};
+// 캐릭터별 그래프: 이름이 확실히 다른 8색. 한 탭 안에서는 보기·지표를 바꿔도 같은 캐릭터 = 같은 색
+const ITEM_COLORS = ["--c1", "--c2", "--c3", "--c4", "--c5", "--c6", "--c7", "--c8"];
+const TOP_N = ITEM_COLORS.length;
 if (!TABS.some(t => t.id === state.market)) state.market = "all";
 
 // ───────── 유틸 ─────────
@@ -227,19 +242,24 @@ function drawItems() {
   const el = $("#plot-items"), d = state.data[state.market], days = d.days;
   const mi = state.imetric === "view" ? 1 : 2, mode = state.imode, ml = state.imetric === "view" ? "View" : "Chat";
   if (!days.length) { el.innerHTML = `<div class="empty">아직 수집된 데이터가 없습니다</div>`; $("#items-legend").innerHTML = ""; $("#items-sub").textContent = ""; return; }
-  // 선정: 누적 보기는 최신 누적 상위, 순증·점유율 보기는 기간 증가량 상위 (수집이 하루뿐이면 누적 상위)
+  // 선정: Chat·View 각각의 누적 상위와 증가량 상위를 번갈아 골라 8개로 고정 → 보기·지표를 바꿔도 같은 캐릭터, 같은 색
   const last = days.at(-1).items;
-  const byAbs = mode === "abs" || days.length < 2;
-  const score = k => {
-    if (byAbs) return last[k][mi];
-    const first = days.find(x => x.items[k]);
-    return last[k][mi] - first.items[k][mi];
-  };
-  const keys = Object.keys(last).sort((a, b) => score(b) - score(a)).slice(0, TOP_N);
-  $("#items-sub").textContent = byAbs
-    ? `${days.at(-1).date} 기준 ${ml} 누적 상위 ${keys.length}개`
-    : `${days[0].date} 이후 ${ml} 증가량 상위 ${keys.length}개`;
-  const series = keys.map((k, j) => ({ k, name: koName(state.market, k, last[k][0] || k), kind: k.startsWith("content") ? "작품" : "캐릭터", color: css(PALETTE[j]),
+  const rank = (m, growth) => Object.keys(last).sort((a, b) => {
+    const sc = k => { if (!growth || days.length < 2) return last[k][m]; const f = days.find(x => x.items[k]); return last[k][m] - f.items[k][m]; };
+    return sc(b) - sc(a);
+  });
+  const lists = [rank(2, false), rank(2, true), rank(1, false), rank(1, true)];
+  const order = [0, 1, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1];
+  const keys = [];
+  const want = Math.min(TOP_N, Object.keys(last).length);
+  while (keys.length < want) {
+    for (const li of order) {
+      const k = lists[li].find(x => !keys.includes(x));
+      if (k && keys.length < want) keys.push(k);
+    }
+  }
+  $("#items-sub").textContent = `Chat·View 누적·증가량 상위 ${keys.length}개 · 보기·지표를 바꿔도 색은 그대로`;
+  const series = keys.map((k, j) => ({ k, name: koName(state.market, k, last[k][0] || k), kind: k.startsWith("content") ? "작품" : "캐릭터", color: css(ITEM_COLORS[j]),
     vals: days.map((_, i) => itemValue(d, i, k, mi, mode)) }));
   const all = series.flatMap(s => s.vals).filter(v => v != null);
   if (!all.length) { el.innerHTML = `<div class="empty">순증은 수집이 2일 이상 쌓이면 표시됩니다</div>`; $("#items-legend").innerHTML = ""; return; }
