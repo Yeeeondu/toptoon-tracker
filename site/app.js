@@ -17,7 +17,11 @@ const state = {
   date: null,
   sort: null,
   data: {},
+  imetric: "chat", // 국가 탭 캐릭터·작품별 그래프 지표
+  imode: "abs",    // abs 누적 / gain 일 순증 / share 순증 점유율
 };
+const PALETTE = ["--s1", "--s2", "--s3", "--s4", "--s5", "--s6", "--s7"];
+const TOP_N = PALETTE.length;
 if (!TABS.some(t => t.id === state.market)) state.market = "all";
 
 // ───────── 유틸 ─────────
@@ -198,7 +202,101 @@ function renderMarket() {
   const dates = d.days.map(x => x.date);
   if (!state.date || !dates.includes(state.date)) state.date = dates[dates.length - 1] || null;
   $("#date").innerHTML = dates.slice().reverse().map(x => `<option ${x === state.date ? "selected" : ""}>${x}</option>`).join("");
+  drawItems();
   renderTable();
+}
+
+// ───────── 국가 탭: 캐릭터·작품별 여러 선 ─────────
+function itemValue(d, i, k, mi, mode) {
+  const it = d.days[i].items[k];
+  if (!it) return null;
+  if (mode === "abs") return it[mi];
+  if (i < 1) return null;
+  const p = d.days[i - 1].items[k];
+  const hours = (new Date(d.days[i].captured_at) - new Date(d.days[i - 1].captured_at)) / 3600e3;
+  if (!p || !(hours >= MIN_GAP_H)) return null;
+  const raw = it[mi] - p[mi];
+  if (mode === "gain") return Math.round(raw * 24 / hours);
+  const tot = gainAt(d, i, mi === 1 ? "view" : "chat")?.raw;
+  return tot > 0 ? (raw / tot) * 100 : null;
+}
+
+function drawItems() {
+  const el = $("#plot-items"), d = state.data[state.market], days = d.days;
+  const mi = state.imetric === "view" ? 1 : 2, mode = state.imode, ml = state.imetric === "view" ? "View" : "Chat";
+  if (!days.length) { el.innerHTML = `<div class="empty">아직 수집된 데이터가 없습니다</div>`; $("#items-legend").innerHTML = ""; $("#items-sub").textContent = ""; return; }
+  // 선정: 기간 동안 가장 많이 늘어난 상위 N개(수집이 하루뿐이면 누적 상위)
+  const last = days.at(-1).items;
+  const score = k => {
+    if (days.length < 2) return last[k][mi];
+    const first = days.find(x => x.items[k]);
+    return last[k][mi] - first.items[k][mi];
+  };
+  const keys = Object.keys(last).sort((a, b) => score(b) - score(a)).slice(0, TOP_N);
+  $("#items-sub").textContent = days.length < 2
+    ? `${ml} 누적 상위 ${keys.length}개 (수집이 쌓이면 증가량 기준으로 바뀝니다)`
+    : `${days[0].date} 이후 ${ml} 증가량 상위 ${keys.length}개`;
+  const series = keys.map((k, j) => ({ k, name: last[k][0] || k, kind: k.startsWith("content") ? "작품" : "캐릭터", color: css(PALETTE[j]),
+    vals: days.map((_, i) => itemValue(d, i, k, mi, mode)) }));
+  const all = series.flatMap(s => s.vals).filter(v => v != null);
+  if (!all.length) { el.innerHTML = `<div class="empty">순증은 수집이 2일 이상 쌓이면 표시됩니다</div>`; $("#items-legend").innerHTML = ""; return; }
+
+  const W = el.clientWidth || 800, H = el.clientHeight || 380;
+  const pad = { l: 56, r: 76, t: 14, b: 22 };
+  const ph = H - pad.t - pad.b, iw = W - pad.l - pad.r;
+  const n = days.length, step = n > 1 ? iw / (n - 1) : 0;
+  const x = i => pad.l + (n > 1 ? step * i : iw / 2);
+  const ticks = mode === "abs" ? niceTicks(Math.min(...all), Math.max(...all)) : niceTicks(Math.min(0, ...all), Math.max(0, ...all, 1));
+  const lo = ticks[0], hi = ticks.at(-1);
+  const y = v => pad.t + ph - ((v - lo) / (hi - lo || 1)) * ph;
+  const lbl = v => (mode === "share" ? `${v.toFixed(0)}%` : short(v));
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="캐릭터·작품별 ${ml}">`;
+  svg += `<g class="axis">`;
+  const tl = ticks.map(t => (mode === "share" ? `${t}%` : short(t))), lab = new Set(tl).size < tl.length ? ticks.map(fmt) : tl;
+  ticks.forEach((t, ti) => {
+    svg += `<line class="gridline" x1="${pad.l}" x2="${W - pad.r}" y1="${y(t)}" y2="${y(t)}"/>`;
+    svg += `<text x="${pad.l - 6}" y="${y(t) + 4}" text-anchor="end">${lab[ti]}</text>`;
+  });
+  if (mode !== "abs") svg += `<line class="baseline" x1="${pad.l}" x2="${W - pad.r}" y1="${y(0)}" y2="${y(0)}"/>`;
+  const every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(iw / 70))));
+  const multiYear = days[0].date.slice(0, 4) !== days.at(-1).date.slice(0, 4);
+  days.forEach((dd, i) => { if (i % every === 0 || i === n - 1) svg += `<text x="${x(i)}" y="${H - 4}" text-anchor="middle">${mdy(dd.date, multiYear)}</text>`; });
+  svg += `</g>`;
+  const labels = [];
+  for (const se of series) {
+    const pts = se.vals.map((v, i) => (v == null ? null : [x(i), y(v)]));
+    let path = "", pen = false;
+    pts.forEach(q => { if (!q) { pen = false; return; } path += (pen ? "L" : "M") + q[0].toFixed(1) + "," + q[1].toFixed(1); pen = true; });
+    if (path.includes("L")) svg += `<path d="${path}" fill="none" stroke="${se.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const li = se.vals.map((v, i) => (v == null ? -1 : i)).filter(i => i >= 0).pop();
+    if (li == null || li < 0) continue;
+    svg += `<circle cx="${x(li)}" cy="${y(se.vals[li])}" r="3" fill="${se.color}"/>`;
+    labels.push({ y: y(se.vals[li]), text: lbl(se.vals[li]), color: se.color });
+  }
+  labels.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 13) labels[i].y = labels[i - 1].y + 13;
+  for (const l of labels) svg += `<text class="endlabel" x="${W - pad.r + 8}" y="${l.y + 4}" style="fill:${l.color}">${l.text}</text>`;
+  svg += `<line class="cross" x1="0" x2="0" y1="${pad.t}" y2="${H - pad.b}" visibility="hidden"/>`;
+  svg += `<rect class="hit" x="${pad.l - step / 2}" y="${pad.t}" width="${iw + step}" height="${ph}"/></svg>`;
+  el.innerHTML = svg;
+
+  const s = el.querySelector("svg"), cross = s.querySelector(".cross"), tip = $("#tip");
+  const unit = v => (mode === "share" ? `${v.toFixed(1)}%` : mode === "gain" ? signed(v) : fmt(v));
+  s.querySelector(".hit").addEventListener("mousemove", e => {
+    const r = s.getBoundingClientRect();
+    const i = Math.max(0, Math.min(n - 1, Math.round(((e.clientX - r.left) * (W / r.width) - pad.l) / (step || 1))));
+    cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i)); cross.setAttribute("visibility", "visible");
+    const rows = series.map(se => ({ se, v: se.vals[i] })).filter(q => q.v != null).sort((a, b) => b.v - a.v);
+    const title = { abs: `${ml} 누적`, gain: `${ml} 일 순증(24h 환산)`, share: `${ml} 순증 점유율` }[mode];
+    tip.innerHTML = `<b>${days[i].date} · ${title}</b>` + (rows.length
+      ? rows.map(q => `<div class="row"><span><i style="background:${q.se.color}"></i>${esc(q.se.name)}</span><span>${unit(q.v)}</span></div>`).join("")
+      : `<div class="row sub"><span>표시할 값이 없습니다</span><span></span></div>`);
+    tip.hidden = false;
+    tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px";
+    tip.style.top = e.clientY + 14 + "px";
+  });
+  s.querySelector(".hit").addEventListener("mouseleave", () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); });
+  $("#items-legend").innerHTML = series.map(se => `<span><i style="background:${se.color}"></i>${esc(se.name)} <small>${se.kind}</small></span>`).join("");
 }
 
 function currentRows() {
@@ -302,6 +400,14 @@ $("#tabs").addEventListener("click", e => {
   render();
 });
 $("#date").addEventListener("change", e => { state.date = e.target.value; renderTable(); });
+for (const [id, key] of [["#imetric", "imetric"], ["#imode", "imode"]]) {
+  $(id).addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    $(id).querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
+    state[key] = b.dataset.v;
+    drawItems();
+  });
+}
 $("#search").addEventListener("input", e => { state.search = e.target.value; renderTable(); });
 $("#table thead").addEventListener("click", e => {
   const th = e.target.closest("th"); if (!th || th.dataset.key === "rank") return;
@@ -322,7 +428,7 @@ $("#csv").addEventListener("click", () => {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 });
 let rt;
-addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => state.market === "all" && renderAll(), 150); });
+addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => (state.market === "all" ? renderAll() : drawItems()), 150); });
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => state.market === "all" && renderAll());
 
 async function refresh() { await loadAll(); render(); }
