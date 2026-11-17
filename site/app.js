@@ -20,6 +20,8 @@ const state = {
   imetric: "chat", // 국가 탭 캐릭터·작품별 그래프 지표
   imode: "abs",    // abs 누적 / gain 일 순증 / share 순증 점유율
 };
+// 일본·대만·미국 이름 옆 한국어 번역 (ko.js)
+const koName = (m, key, name) => { const t = window.KO?.[m]?.[key]; return t && t !== name ? `${name} (${t})` : name; };
 const PALETTE = ["--s1", "--s2", "--s3", "--s4", "--s5", "--s6", "--s7"];
 const TOP_N = PALETTE.length;
 if (!TABS.some(t => t.id === state.market)) state.market = "all";
@@ -225,18 +227,19 @@ function drawItems() {
   const el = $("#plot-items"), d = state.data[state.market], days = d.days;
   const mi = state.imetric === "view" ? 1 : 2, mode = state.imode, ml = state.imetric === "view" ? "View" : "Chat";
   if (!days.length) { el.innerHTML = `<div class="empty">아직 수집된 데이터가 없습니다</div>`; $("#items-legend").innerHTML = ""; $("#items-sub").textContent = ""; return; }
-  // 선정: 기간 동안 가장 많이 늘어난 상위 N개(수집이 하루뿐이면 누적 상위)
+  // 선정: 누적 보기는 최신 누적 상위, 순증·점유율 보기는 기간 증가량 상위 (수집이 하루뿐이면 누적 상위)
   const last = days.at(-1).items;
+  const byAbs = mode === "abs" || days.length < 2;
   const score = k => {
-    if (days.length < 2) return last[k][mi];
+    if (byAbs) return last[k][mi];
     const first = days.find(x => x.items[k]);
     return last[k][mi] - first.items[k][mi];
   };
   const keys = Object.keys(last).sort((a, b) => score(b) - score(a)).slice(0, TOP_N);
-  $("#items-sub").textContent = days.length < 2
-    ? `${ml} 누적 상위 ${keys.length}개 (수집이 쌓이면 증가량 기준으로 바뀝니다)`
+  $("#items-sub").textContent = byAbs
+    ? `${days.at(-1).date} 기준 ${ml} 누적 상위 ${keys.length}개`
     : `${days[0].date} 이후 ${ml} 증가량 상위 ${keys.length}개`;
-  const series = keys.map((k, j) => ({ k, name: last[k][0] || k, kind: k.startsWith("content") ? "작품" : "캐릭터", color: css(PALETTE[j]),
+  const series = keys.map((k, j) => ({ k, name: koName(state.market, k, last[k][0] || k), kind: k.startsWith("content") ? "작품" : "캐릭터", color: css(PALETTE[j]),
     vals: days.map((_, i) => itemValue(d, i, k, mi, mode)) }));
   const all = series.flatMap(s => s.vals).filter(v => v != null);
   if (!all.length) { el.innerHTML = `<div class="empty">순증은 수집이 2일 이상 쌓이면 표시됩니다</div>`; $("#items-legend").innerHTML = ""; return; }
@@ -313,7 +316,7 @@ function currentRows() {
       const [kind, id] = key.split(":");
       const p = prev[key];
       rows.push({
-        kind: kind === "content" ? "작품" : "캐릭터", name: name || key, url: `${d.source}/detail/${kind}/${id}`,
+        kind: kind === "content" ? "작품" : "캐릭터", name: koName(state.market, key, name || key), url: `${d.source}/detail/${kind}/${id}`,
         view, chat, dview: p ? view - p[1] : null, dchat: p ? chat - p[2] : null,
       });
     }
