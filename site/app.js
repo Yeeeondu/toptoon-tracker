@@ -96,62 +96,48 @@ function drawCountry(card, m) {
   if (!sel.length) { body.innerHTML = `<div class="empty">아직 수집된 데이터가 없습니다</div>`; return; }
 
   const color = css(m.color);
-  const W = body.clientWidth || 520, H = body.clientHeight || 420;
-  // 각 지표 칸 = 위쪽 선(누적 절대값) + 아래쪽 막대 띠(그날 순증)
-  const pad = { l: 52, r: 84, t: 22, b: 22, gap: 34 }, barH = 50, barGap = 18;
+  const W = body.clientWidth || 520, H = body.clientHeight || 380;
+  // 각 지표 칸 = 그날 순증 막대(24시간 기준 환산). 누적값은 카드 위쪽 숫자로만 표시
+  const pad = { l: 56, r: 76, t: 22, b: 22, gap: 34 };
   const ph = (H - pad.t - pad.b - pad.gap) / 2;
-  const lh = ph - barH - barGap;
   const iw = W - pad.l - pad.r;
   const step = sel.length > 1 ? iw / (sel.length - 1) : 0;
   const x = k => pad.l + (sel.length > 1 ? step * k : iw / 2);
   const panels = [
-    { key: "view", label: "View", top: pad.t },
-    { key: "chat", label: "Chat", top: pad.t + ph + pad.gap },
+    { key: "view", label: "View 순증", top: pad.t },
+    { key: "chat", label: "Chat 순증", top: pad.t + ph + pad.gap },
   ];
-  const surface = css("--surface");
-  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${m.name} View·Chat 절대값과 일별 순증">`;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${m.name} View·Chat 일별 순증">`;
 
   for (const p of panels) {
-    // 선: 누적 절대값
-    const vals = sel.map(i => d.abs[i][p.key]);
-    const ticks = niceTicks(Math.min(...vals), Math.max(...vals));
-    const lo = ticks[0], hi = ticks[ticks.length - 1];
-    const y = v => p.top + lh - ((v - lo) / (hi - lo || 1)) * lh;
     svg += `<text class="plabel" x="${pad.l}" y="${p.top - 8}">${p.label}</text>`;
+    const gains = sel.map(i => gainAt(d, i, p.key)?.norm ?? null);
+    const gv = gains.filter(v => v != null);
+    if (!gv.length) {
+      svg += `<text class="gainlabel" x="${pad.l + iw / 2}" y="${p.top + ph / 2}" text-anchor="middle">수집이 2일 이상 쌓이면 표시됩니다</text>`;
+      continue;
+    }
+    const ticks = niceTicks(Math.min(0, ...gv), Math.max(0, ...gv, 1));
+    const lo = ticks[0], hi = ticks[ticks.length - 1];
+    const y = v => p.top + ph - ((v - lo) / (hi - lo || 1)) * ph;
     svg += `<g class="axis">`;
     const tl = ticks.map(short), lab = new Set(tl).size < tl.length ? ticks.map(fmt) : tl; for (const [ti, t] of ticks.entries()) {
       svg += `<line class="gridline" x1="${pad.l}" x2="${W - pad.r}" y1="${y(t)}" y2="${y(t)}"/>`;
       svg += `<text x="${pad.l - 6}" y="${y(t) + 4}" text-anchor="end">${lab[ti]}</text>`;
     }
     svg += `</g>`;
-    const pts = sel.map((i, k) => [x(k), y(d.abs[i][p.key])]);
-    const path = pts.map((q, j) => (j ? "L" : "M") + q[0].toFixed(1) + "," + q[1].toFixed(1)).join("");
-    if (pts.length > 1) svg += `<path d="${path}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
-    const last = pts[pts.length - 1];
-    svg += `<circle cx="${last[0]}" cy="${last[1]}" r="4" fill="${color}" stroke="${surface}" stroke-width="2"/>`;
-    svg += `<text class="endlabel" x="${last[0] + 8}" y="${last[1] + 4}">${short(vals[vals.length - 1])}</text>`;
-
-    // 막대: 그날 순증(직전 수집 대비 합계 변화)
-    const bTop = p.top + lh + barGap;
-    const gains = sel.map(i => gainAt(d, i, p.key)?.norm ?? null);
-    const gv = gains.filter(v => v != null);
-    const gLo = Math.min(0, ...gv), gHi = Math.max(0, ...gv, 1);
-    const by = v => bTop + barH - ((v - gLo) / (gHi - gLo || 1)) * barH;
-    svg += `<line class="gridline" x1="${pad.l}" x2="${W - pad.r}" y1="${by(gHi)}" y2="${by(gHi)}"/>`;
-    svg += `<g class="axis"><text x="${pad.l - 6}" y="${by(gHi) + 4}" text-anchor="end">${gv.length ? short(gHi) : ""}</text>`;
-    svg += `<text x="${pad.l - 6}" y="${by(0) + 4}" text-anchor="end">0</text></g>`;
-    const bw = Math.max(2, Math.min(14, (sel.length > 1 ? step : iw) * 0.6));
+    const bw = Math.max(2, Math.min(18, (sel.length > 1 ? step : iw) * 0.6));
     gains.forEach((g, k) => {
       if (g == null || g === 0) return;
-      const y0 = by(0), y1 = by(g), h = Math.abs(y0 - y1), top = Math.min(y0, y1), r = Math.min(3, h / 2, bw / 2);
+      const y0 = y(0), y1 = y(g), h = Math.abs(y0 - y1), top = Math.min(y0, y1), r = Math.min(4, h / 2, bw / 2);
       const x0 = x(k) - bw / 2;
       svg += g > 0
-        ? `<path class="gainbar" d="M${x0},${y0}V${top + r}Q${x0},${top} ${x0 + r},${top}H${x0 + bw - r}Q${x0 + bw},${top} ${x0 + bw},${top + r}V${y0}Z" fill="${color}"/>`
-        : `<rect class="gainbar" x="${x0}" y="${top}" width="${bw}" height="${h}" fill="${css("--down")}"/>`;
+        ? `<path d="M${x0},${y0}V${top + r}Q${x0},${top} ${x0 + r},${top}H${x0 + bw - r}Q${x0 + bw},${top} ${x0 + bw},${top + r}V${y0}Z" fill="${color}"/>`
+        : `<rect x="${x0}" y="${top}" width="${bw}" height="${h}" fill="${css("--down")}"/>`;
     });
-    svg += `<line class="baseline" x1="${pad.l}" x2="${W - pad.r}" y1="${by(0)}" y2="${by(0)}"/>`;
-    const lastG = gains[gains.length - 1];
-    if (lastG != null) svg += `<text class="endlabel" x="${W - pad.r + 8}" y="${by(gHi) + 26}">${(lastG > 0 ? "+" : "") + short(lastG)}</text>`;
+    svg += `<line class="baseline" x1="${pad.l}" x2="${W - pad.r}" y1="${y(0)}" y2="${y(0)}"/>`;
+    const lastK = gains.length - 1, lastG = gains[lastK];
+    if (lastG != null) svg += `<text class="endlabel" x="${x(lastK) + bw / 2 + 6}" y="${y(lastG) + 4}">${(lastG > 0 ? "+" : "") + short(lastG)}</text>`;
   }
   // 날짜 축
   const every = Math.max(1, Math.ceil(sel.length / Math.max(2, Math.floor(iw / 70))));
