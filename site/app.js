@@ -3,9 +3,9 @@
 // ───────── 설정 ─────────
 const MARKETS = [
   { id: "kr", name: "한국", color: "--s1" },
+  { id: "jp", name: "일본", color: "--s4" },
   { id: "tw", name: "대만", color: "--s2" },
   { id: "us", name: "미국", color: "--s3" },
-  { id: "jp", name: "일본", color: "--s4" },
 ];
 const TABS = [{ id: "all", name: "종합" }, ...MARKETS];
 const REFRESH_MS = 10 * 60 * 1000;
