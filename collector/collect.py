@@ -63,6 +63,27 @@ CHAT_RE = re.compile(r'\\?"chatCount\\?":\s*(\d+)')
 TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S)
 # 캐릭터의 시나리오(시즌) 목록: 각 시나리오에 "characterId":캐릭터번호,"title" 이 붙습니다.
 SCENARIO_RE = r'\\?"characterId\\?":\s*{id}\s*,\s*\\?"title\\?"'
+# 캐릭터 해시태그(View 숫자 뒤에 오는 캐릭터 본인의 태그 목록)
+TAGS_RE = re.compile(r'\\?"hashtags\\?":\s*\[(.*?)\]', re.S)
+# 일본 캐릭터 유형: 태그로 구분합니다. 앞에서부터 먼저 맞는 유형으로 봅니다.
+#   live 실사(버추얼 휴먼)  : 'TOPTOONチャットオリジナル実写'
+#   original 탑툰챗 오리지널: 'TOPTOONチャットオリジナル', '韓国TOPTOONオリジナル'
+#   creator 크리에이터 제작 : 'クリエーター'
+#   source 원작 기반(그 외)  : 웹툰·웹소설 원작 등
+TYPED_MARKETS = {"jp"}
+
+
+def char_type(page: str) -> str:
+    v = VIEW_RE.search(page)
+    m = TAGS_RE.search(page, v.start() if v else 0)
+    tags = m.group(1) if m else ""
+    if "実写" in tags:
+        return "live"
+    if "オリジナル" in tags:
+        return "original"
+    if "クリエーター" in tags:
+        return "creator"
+    return "source"
 # 제목 "이름 AI 채팅 | ..." 에서 이름만 남깁니다(국가별 표기 포함).
 TITLE_TAIL_RE = re.compile(r"\s*AI\s?(채팅|聊天|Chat|チャット).*$", re.S)
 
@@ -166,7 +187,11 @@ def collect_market(market: str, force: bool) -> bool:
     def work(key: str):
         kind, item_id = key.split(":")
         try:
-            return key, parse_detail(fetch(f"{base}/detail/{kind}/{item_id}", lang), kind, item_id)
+            page = fetch(f"{base}/detail/{kind}/{item_id}", lang)
+            parsed = parse_detail(page, kind, item_id)
+            if parsed and kind == "character" and market in TYPED_MARKETS:
+                return key, parsed + (char_type(page),)
+            return key, parsed
         except RuntimeError:
             return key, None
 
@@ -174,10 +199,10 @@ def collect_market(market: str, force: bool) -> bool:
     with ThreadPoolExecutor(WORKERS) as pool:
         for key, parsed in pool.map(work, sorted(keys)):
             if parsed:
-                name, view, chat, scenarios = parsed
+                name, view, chat, scenarios = parsed[:4]
                 if not name and key in prev:
                     name = prev[key][0]
-                items[key] = [name, view, chat] + ([scenarios] if scenarios is not None else [])
+                items[key] = [name, view, chat] + ([scenarios] if scenarios is not None else []) + list(parsed[4:])
 
     expected = max(10, int(len(prev) * MIN_SUCCESS_RATIO))
     if len(items) < expected:
@@ -190,6 +215,12 @@ def collect_market(market: str, force: bool) -> bool:
         "scenario": sum(v[3] for v in chars if len(v) > 3),       # 캐릭터별 시나리오(시즌) 합계
         "multi": len(items) - len(chars),                         # 여러 캐릭터 단체 대화(MULTI)
     }
+    if market in TYPED_MARKETS:                                   # 캐릭터 유형별 수(일본)
+        types: dict[str, int] = {}
+        for v in chars:
+            if len(v) > 4:
+                types[v[4]] = types.get(v[4], 0) + 1
+        counts["types"] = types
     data["days"] = [d for d in data["days"] if d["date"] != today]
     data["days"].append({
         "date": today,
