@@ -256,14 +256,49 @@ const COUNT_DEFS = [
   { k: "scenario", label: "시나리오", desc: "캐릭터별 시나리오(시즌) 합계", unit: "개", color: "--c3" },
   { k: "multi", label: "MULTI", desc: "여러 캐릭터 단체 대화", unit: "개", color: "--c2" },
 ];
+// 일본 캐릭터 유형(수집기가 태그로 분류). 유형 기록이 없는 날은 그 캐릭터의 가장 최근 유형으로 소급합니다.
+const TYPE_DEFS = [
+  { k: "source", label: "원작 기반", desc: "웹툰·웹소설 원작 등 (그 외 전부)", unit: "명", color: "--c1" },
+  { k: "creator", label: "크리에이터", desc: "'クリエーター' 태그", unit: "명", color: "--c4" },
+  { k: "original", label: "탑툰챗 오리지널", desc: "'TOPTOONオリジナル' 태그", unit: "명", color: "--c5" },
+  { k: "live", label: "실사", desc: "'オリジナル実写' 태그 · 버추얼 휴먼", unit: "명", color: "--c6" },
+];
+const TYPED_MARKETS = ["jp"];
+let typeCache = null;
+function dayTypes(market, days) {
+  const id = market + "|" + days.length + "|" + days.at(-1).captured_at;
+  if (typeCache?.id === id) return typeCache.rows;
+  const known = {};
+  for (const day of days) for (const [k, v] of Object.entries(day.items)) if (v[4]) known[k] = v[4];
+  const hasAny = Object.keys(known).length > 0;
+  const rows = days.map(day => {
+    if (!hasAny) return {};
+    const r = Object.fromEntries(TYPE_DEFS.map(t => [t.k, 0]));
+    for (const [k, v] of Object.entries(day.items)) {
+      if (!k.startsWith("character:")) continue;
+      const t = v[4] || known[k] || "source";
+      r[t] = (r[t] || 0) + 1;
+    }
+    return r;
+  });
+  typeCache = { id, rows };
+  return rows;
+}
+
 function drawCounts() {
   const el = $("#counts"), days = state.data[state.market].days;
-  if (!days.length) { el.innerHTML = `<div class="empty">아직 수집된 데이터가 없습니다</div>`; return; }
-  const rows = days.map(dayCounts);
-  el.innerHTML = COUNT_DEFS.map(c => `<div class="count-card"><div class="count-head"><b>${c.label}</b><small>${c.desc}</small></div>` +
+  const typed = TYPED_MARKETS.includes(state.market);
+  $("#types-wrap").hidden = !typed;
+  if (!days.length) { el.innerHTML = `<div class="empty">아직 수집된 데이터가 없습니다</div>`; $("#types").innerHTML = ""; return; }
+  drawCountCards(el, COUNT_DEFS, days.map(dayCounts), days);
+  if (typed) drawCountCards($("#types"), TYPE_DEFS, dayTypes(state.market, days), days);
+}
+
+function drawCountCards(el, defs, rows, days) {
+  el.innerHTML = defs.map(c => `<div class="count-card"><div class="count-head"><b>${c.label}</b><small>${c.desc}</small></div>` +
     `<div class="count-val"></div><div class="count-d"></div><div class="count-plot"></div></div>`).join("");
   const multiYear = days[0].date.slice(0, 4) !== days.at(-1).date.slice(0, 4);
-  COUNT_DEFS.forEach((c, ci) => {
+  defs.forEach((c, ci) => {
     const card = el.children[ci], color = css(c.color);
     const pts = rows.map((r, i) => ({ i, v: r[c.k] })).filter(p => p.v != null);
     const last = pts.at(-1), prev = pts.at(-2);
