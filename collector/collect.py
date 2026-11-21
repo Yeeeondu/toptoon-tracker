@@ -61,6 +61,8 @@ LISTED_RE = re.compile(r"""(?:href=["']?)/detail/(character|content)/([0-9]+)"""
 VIEW_RE = re.compile(r'\\?"viewCount\\?":\s*(\d+)')
 CHAT_RE = re.compile(r'\\?"chatCount\\?":\s*(\d+)')
 TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S)
+# 캐릭터의 시나리오(시즌) 목록: 각 시나리오에 "characterId":캐릭터번호,"title" 이 붙습니다.
+SCENARIO_RE = r'\\?"characterId\\?":\s*{id}\s*,\s*\\?"title\\?"'
 # 제목 "이름 AI 채팅 | ..." 에서 이름만 남깁니다(국가별 표기 포함).
 TITLE_TAIL_RE = re.compile(r"\s*AI\s?(채팅|聊天|Chat|チャット).*$", re.S)
 
@@ -83,8 +85,9 @@ def fetch(url: str, lang: str = "ko-KR,ko;q=0.9") -> str:
     raise RuntimeError(f"{url}: {last}")
 
 
-def parse_detail(page: str) -> tuple[str, int, int] | None:
-    """상세 페이지 HTML에서 (이름, View, Chat)을 뽑습니다. 못 찾으면 None."""
+def parse_detail(page: str, kind: str = "", item_id: str = "") -> tuple[str, int, int, int | None] | None:
+    """상세 페이지 HTML에서 (이름, View, Chat, 시나리오 수)를 뽑습니다. 못 찾으면 None.
+    시나리오 수는 캐릭터만 셉니다(MULTI는 None)."""
     v = VIEW_RE.search(page)
     c = CHAT_RE.search(page)
     if not v or not c:
@@ -93,7 +96,10 @@ def parse_detail(page: str) -> tuple[str, int, int] | None:
     t = TITLE_RE.search(page)
     if t:
         name = TITLE_TAIL_RE.sub("", html.unescape(t.group(1))).strip()
-    return name, int(v.group(1)), int(c.group(1))
+    scenarios = None
+    if kind == "character" and item_id:
+        scenarios = len(re.findall(SCENARIO_RE.replace("{id}", item_id), page))
+    return name, int(v.group(1)), int(c.group(1)), scenarios
 
 
 def discover(base: str, lang: str) -> tuple[set[str], set[str]]:
@@ -160,7 +166,7 @@ def collect_market(market: str, force: bool) -> bool:
     def work(key: str):
         kind, item_id = key.split(":")
         try:
-            return key, parse_detail(fetch(f"{base}/detail/{kind}/{item_id}", lang))
+            return key, parse_detail(fetch(f"{base}/detail/{kind}/{item_id}", lang), kind, item_id)
         except RuntimeError:
             return key, None
 
@@ -168,25 +174,32 @@ def collect_market(market: str, force: bool) -> bool:
     with ThreadPoolExecutor(WORKERS) as pool:
         for key, parsed in pool.map(work, sorted(keys)):
             if parsed:
-                name, view, chat = parsed
+                name, view, chat, scenarios = parsed
                 if not name and key in prev:
                     name = prev[key][0]
-                items[key] = [name, view, chat]
+                items[key] = [name, view, chat] + ([scenarios] if scenarios is not None else [])
 
     expected = max(10, int(len(prev) * MIN_SUCCESS_RATIO))
     if len(items) < expected:
         log(f"[{market}] 성공 {len(items)}개로 너무 적어 저장하지 않습니다(기준 {expected}개).")
         return False
 
+    chars = [v for k, v in items.items() if k.startswith("character:")]
+    counts = {
+        "character": len(chars),                                  # 1:1 대화 가능한 캐릭터
+        "scenario": sum(v[3] for v in chars if len(v) > 3),       # 캐릭터별 시나리오(시즌) 합계
+        "multi": len(items) - len(chars),                         # 여러 캐릭터 단체 대화(MULTI)
+    }
     data["days"] = [d for d in data["days"] if d["date"] != today]
     data["days"].append({
         "date": today,
         "captured_at": now.isoformat(timespec="seconds"),
+        "counts": counts,
         "items": items,
         "listed": sorted(k for k in listed if k in items),
     })
     save(market, data)
-    log(f"[{market}] 저장 완료: 전체 {len(items)}개 (View {sum(v[1] for v in items.values()):,}, "
+    log(f"[{market}] 저장 완료: 캐릭터 {counts['character']}명 · 시나리오 {counts['scenario']}개 · MULTI {counts['multi']}개 (View {sum(v[1] for v in items.values()):,}, "
         f"Chat {sum(v[2] for v in items.values()):,})")
     return True
 
