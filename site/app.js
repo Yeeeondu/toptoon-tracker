@@ -91,7 +91,7 @@ const kstToday = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 // ───────── 데이터 ─────────
-// 집계 기준: 매일 사이트에 공개된 전체 작품(캐릭터·작품)의 합계. 직접 수집한 날만 사용합니다.
+// 집계 기준: 매일 사이트에 공개된 전체 캐릭터·MULTI의 합계. 직접 수집한 날만 사용합니다.
 const counted = day => Object.keys(day.items);
 function prepare(raw, id) {
   const days = (raw.days || []).filter(d => !d.imported).sort((a, b) => a.date.localeCompare(b.date));
@@ -217,7 +217,7 @@ function drawCountry(card, m) {
     const row = (key, label) => `<div class="row"><span>${label}</span><span>${fmt(a[key])}</span></div>` +
       (g[key] ? `<div class="row sub"><span>순증(24h 환산)</span><span>${g[key].norm == null ? "—" : signed(g[key].norm)}</span></div>` +
         `<div class="row sub"><span>실제 증가 · ${hrs(g[key].hours)}</span><span>${signed(g[key].raw)}</span></div>` : "");
-    tip.innerHTML = `<b>${m.name} · ${capt} 수집 · ${counted(d.days[i]).length}개 작품</b>` + row("view", "View") + row("chat", "Chat");
+    tip.innerHTML = `<b>${m.name} · ${capt} 수집 · ${countLine(d.days[i])}</b>` + row("view", "View") + row("chat", "Chat");
     tip.hidden = false;
     tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px";
     tip.style.top = e.clientY + 14 + "px";
@@ -244,17 +244,88 @@ function renderAll() {
   box.querySelectorAll(".country").forEach(card => drawCountry(card, MARKETS.find(m => m.id === card.dataset.id)));
 }
 
-// ───────── 국가 탭: 작품별 원자료 ─────────
+// ───────── 국가 탭: 캐릭터·시나리오·MULTI 수 ─────────
+function dayCounts(day) {
+  const ks = Object.keys(day.items);
+  const character = ks.filter(k => k.startsWith("character:")).length;
+  return { character, scenario: day.counts?.scenario ?? null, multi: ks.length - character };
+}
+const countLine = day => { const c = dayCounts(day); return `캐릭터 ${fmt(c.character)} · MULTI ${fmt(c.multi)}`; };
+const COUNT_DEFS = [
+  { k: "character", label: "캐릭터", desc: "1:1 대화 가능한 캐릭터", unit: "명", color: "--c1" },
+  { k: "scenario", label: "시나리오", desc: "캐릭터별 시나리오(시즌) 합계", unit: "개", color: "--c3" },
+  { k: "multi", label: "MULTI", desc: "여러 캐릭터 단체 대화", unit: "개", color: "--c2" },
+];
+function drawCounts() {
+  const el = $("#counts"), days = state.data[state.market].days;
+  if (!days.length) { el.innerHTML = `<div class="empty">아직 수집된 데이터가 없습니다</div>`; return; }
+  const rows = days.map(dayCounts);
+  el.innerHTML = COUNT_DEFS.map(c => `<div class="count-card"><div class="count-head"><b>${c.label}</b><small>${c.desc}</small></div>` +
+    `<div class="count-val"></div><div class="count-d"></div><div class="count-plot"></div></div>`).join("");
+  const multiYear = days[0].date.slice(0, 4) !== days.at(-1).date.slice(0, 4);
+  COUNT_DEFS.forEach((c, ci) => {
+    const card = el.children[ci], color = css(c.color);
+    const pts = rows.map((r, i) => ({ i, v: r[c.k] })).filter(p => p.v != null);
+    const last = pts.at(-1), prev = pts.at(-2);
+    card.querySelector(".count-val").textContent = last ? `${fmt(last.v)}${c.unit}` : "–";
+    const diff = last && prev ? last.v - prev.v : null;
+    const dEl = card.querySelector(".count-d");
+    dEl.textContent = !last ? "다음 수집부터 집계" : diff == null ? `${days[last.i].date}부터 집계` : diff === 0 ? "전일 대비 변동 없음" : `전일 대비 ${signed(diff)}`;
+    dEl.classList.toggle("up", diff > 0); dEl.classList.toggle("down", diff < 0);
+    const box = card.querySelector(".count-plot");
+    if (!pts.length) { box.innerHTML = ""; return; }
+    const W = box.clientWidth || 300, H = box.clientHeight || 110, pad = { l: 34, r: 10, t: 10, b: 18 };
+    const n = days.length, iw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
+    const x = i => pad.l + (n > 1 ? (iw * i) / (n - 1) : iw / 2);
+    const vs = pts.map(p => p.v);
+    let lo = Math.min(...vs), hi = Math.max(...vs);
+    if (hi - lo < 4) { const mid = (hi + lo) / 2; lo = Math.max(0, Math.floor(mid - 2)); hi = Math.ceil(mid + 2); }
+    const y = v => pad.t + ph - ((v - lo) / (hi - lo || 1)) * ph;
+    let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${c.label} 수"><g class="axis">`;
+    for (const t of [lo, hi]) {
+      svg += `<line class="gridline" x1="${pad.l}" x2="${W - pad.r}" y1="${y(t)}" y2="${y(t)}"/>`;
+      svg += `<text x="${pad.l - 6}" y="${y(t) + 4}" text-anchor="end">${fmt(t)}</text>`;
+    }
+    svg += `<text x="${x(0)}" y="${H - 3}" text-anchor="start">${mdy(days[0].date, multiYear)}</text>`;
+    if (n > 1) svg += `<text x="${x(n - 1)}" y="${H - 3}" text-anchor="end">${mdy(days.at(-1).date, multiYear)}</text>`;
+    svg += `</g>`;
+    // 계단선: 캐릭터·시나리오·MULTI가 추가/제외된 날 선이 꺾입니다
+    let path = "";
+    pts.forEach((p, j) => { path += j ? `H${x(p.i).toFixed(1)}V${y(p.v).toFixed(1)}` : `M${x(p.i).toFixed(1)},${y(p.v).toFixed(1)}`; });
+    if (pts.length > 1) svg += `<path d="${path}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>`;
+    // 점은 값이 바뀐 날과 마지막 날에만
+    pts.forEach((p, j) => { if (p === last || j === 0 || p.v !== pts[j - 1].v) svg += `<circle cx="${x(p.i)}" cy="${y(p.v)}" r="${p === last ? 4 : 2.5}" fill="${color}"/>`; });
+    svg += `<line class="cross" x1="0" x2="0" y1="${pad.t}" y2="${H - pad.b}" visibility="hidden"/>`;
+    svg += `<rect class="hit" x="${pad.l - 8}" y="0" width="${iw + 16}" height="${H}"/></svg>`;
+    box.innerHTML = svg;
+    const s = box.querySelector("svg"), cross = s.querySelector(".cross"), tip = $("#tip");
+    s.querySelector(".hit").addEventListener("mousemove", e => {
+      const r = s.getBoundingClientRect(), mx = (e.clientX - r.left) * (W / r.width);
+      const p = pts.reduce((a, b) => (Math.abs(x(b.i) - mx) < Math.abs(x(a.i) - mx) ? b : a));
+      const j = pts.indexOf(p), d0 = j > 0 ? p.v - pts[j - 1].v : null;
+      cross.setAttribute("x1", x(p.i)); cross.setAttribute("x2", x(p.i)); cross.setAttribute("visibility", "visible");
+      tip.innerHTML = `<b>${days[p.i].date} · ${c.label}</b><div class="row"><span>${c.label} 수</span><span>${fmt(p.v)}${c.unit}</span></div>` +
+        (d0 == null ? "" : `<div class="row sub"><span>전일 대비</span><span>${d0 ? signed(d0) : "변동 없음"}</span></div>`);
+      tip.hidden = false;
+      tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px";
+      tip.style.top = e.clientY + 14 + "px";
+    });
+    s.querySelector(".hit").addEventListener("mouseleave", () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); });
+  });
+}
+
+// ───────── 국가 탭: 캐릭터·MULTI별 원자료 ─────────
 function renderMarket() {
   const d = state.data[state.market];
   const dates = d.days.map(x => x.date);
   if (!state.date || !dates.includes(state.date)) state.date = dates[dates.length - 1] || null;
   $("#date").innerHTML = dates.slice().reverse().map(x => `<option ${x === state.date ? "selected" : ""}>${x}</option>`).join("");
+  drawCounts();
   drawItems();
   renderTable();
 }
 
-// ───────── 국가 탭: 캐릭터·작품별 여러 선 ─────────
+// ───────── 국가 탭: 캐릭터·MULTI별 여러 선 ─────────
 function itemValue(d, i, k, mi, mode) {
   const it = d.days[i].items[k];
   if (!it) return null;
@@ -294,7 +365,7 @@ function drawItems() {
   const lo = ticks[0], hi = ticks.at(-1);
   const y = v => pad.t + ph - ((v - lo) / (hi - lo || 1)) * ph;
   const lbl = v => (mode === "share" ? `${v.toFixed(0)}%` : short(v));
-  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="캐릭터·작품별 ${ml}">`;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="캐릭터·MULTI별 ${ml}">`;
   svg += `<g class="axis">`;
   const tl = ticks.map(t => (mode === "share" ? `${t}%` : short(t))), lab = new Set(tl).size < tl.length ? ticks.map(fmt) : tl;
   ticks.forEach((t, ti) => {
@@ -357,7 +428,7 @@ function currentRows() {
       const [kind, id] = key.split(":");
       const p = prev[key];
       rows.push({
-        kind: kind === "content" ? "작품" : "캐릭터", name: koName(state.market, key, name || key), url: `${d.source}/detail/${kind}/${id}`,
+        kind: kind === "content" ? "MULTI" : "캐릭터", name: koName(state.market, key, name || key), url: `${d.source}/detail/${kind}/${id}`,
         view, chat, dview: p ? view - p[1] : null, dchat: p ? chat - p[2] : null,
       });
     }
@@ -378,7 +449,7 @@ function currentRows() {
 const COLS = [
   { key: "rank", label: "순위" },
   { key: "kind", label: "구분", l: true },
-  { key: "name", label: "작품", l: true },
+  { key: "name", label: "이름", l: true },
   { key: "view", label: "View" },
   { key: "chat", label: "Chat" },
   { key: "dview", label: "View 증감" },
@@ -399,7 +470,7 @@ function renderTable() {
     `<td class="l name"><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.name)}</a></td>` +
     `<td>${fmt(r.view)}</td><td>${fmt(r.chat)}</td>` +
     `<td class="${cls(r.dview)}">${signed(r.dview)}</td><td class="${cls(r.dchat)}">${signed(r.dchat)}</td></tr>`).join("")
-    || `<tr><td colspan="7" class="l zero">표시할 작품이 없습니다</td></tr>`);
+    || `<tr><td colspan="7" class="l zero">표시할 항목이 없습니다</td></tr>`);
   $("#table-sub").textContent = day
     ? `${new Date(day.captured_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} 기준 · 증감은 직전 수집 대비 실제 증가` +
       (gainAt(d, d.days.indexOf(day), "view") ? ` (${hrs(gainAt(d, d.days.indexOf(day), "view").hours)} 간격)` : "") + " · 제목을 누르면 정렬"
@@ -464,7 +535,7 @@ $("#table thead").addEventListener("click", e => {
 $("#csv").addEventListener("click", () => {
   const { shown } = currentRows();
   const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const head = ["구분", "작품", "View", "Chat", "View 증감", "Chat 증감", "링크"];
+  const head = ["구분", "이름", "View", "Chat", "View 증감", "Chat 증감", "링크"];
   const body = shown.map(r => [r.kind, r.name, r.view, r.chat, r.dview, r.dchat, r.url].map(q).join(","));
   const blob = new Blob([String.fromCharCode(0xFEFF) + [head.map(q).join(","), ...body].join("\n")], { type: "text/csv" });
   const a = document.createElement("a");
@@ -474,7 +545,7 @@ $("#csv").addEventListener("click", () => {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 });
 let rt;
-addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => (state.market === "all" ? renderAll() : drawItems()), 150); });
+addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => (state.market === "all" ? renderAll() : (drawCounts(), drawItems())), 150); });
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => state.market === "all" && renderAll());
 
 async function refresh() { await loadAll(); render(); }
