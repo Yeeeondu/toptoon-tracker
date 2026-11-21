@@ -174,3 +174,6 @@ tr.total td { font-weight: 700; background: var(--bg); position: sticky; top: 37
 .count-plot { height: 110px; margin-top: 4px; }
 .count-plot svg, .counts .empty { width: 100%; height: 100%; }
 @media (max-width: 760px) { .counts { grid-template-columns: 1fr; } }
+.types-title { margin: 16px 0 0; font-size: 14px; }
+.counts.types { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 960px) { .counts.types { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
