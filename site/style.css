@@ -160,3 +160,17 @@ tr.total td { font-weight: 700; background: var(--bg); position: sticky; top: 37
 .ctrls { display: flex; gap: 8px; flex-wrap: wrap; }
 .items-plot { height: 380px; }
 .legend small { color: var(--muted); font-size: 11px; }
+/* 국가 탭: 캐릭터·시나리오·MULTI 수 */
+.counts-panel { margin-bottom: 12px; }
+.counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.count-card { border: 1px solid var(--line); border-radius: 10px; padding: 12px 12px 6px; min-width: 0; }
+.count-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.count-head b { font-size: 13px; }
+.count-head small { color: var(--muted); font-size: 11px; }
+.count-val { font-size: 24px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.count-d { color: var(--muted); font-size: 12px; }
+.count-d.up { color: var(--up, #1a8a4a); }
+.count-d.down { color: var(--down, #c0392b); }
+.count-plot { height: 110px; margin-top: 4px; }
+.count-plot svg, .counts .empty { width: 100%; height: 100%; }
+@media (max-width: 760px) { .counts { grid-template-columns: 1fr; } }
