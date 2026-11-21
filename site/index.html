@@ -27,16 +27,22 @@
         <button data-v="90">90일</button>
         <button data-v="30">30일</button>
       </div>
-      <p class="hint">집계 기준: 매일 사이트에 공개된 전체 작품(캐릭터·작품)의 합계 · 위 숫자는 누적, 막대는 그날 순증(24시간 기준 환산)</p>
+      <p class="hint">집계 기준: 매일 사이트에 공개된 전체 캐릭터·MULTI의 합계 · 위 숫자는 누적, 막대는 그날 순증(24시간 기준 환산)</p>
     </div>
     <div class="countries" id="countries"></div>
   </section>
 
-  <!-- 국가 탭: 합계를 만드는 작품별 원자료 -->
+  <!-- 국가 탭: 캐릭터·시나리오·MULTI 수, 캐릭터별 추이, 합계를 만드는 원자료 -->
   <section id="view-market" hidden>
+    <article class="panel counts-panel">
+      <div class="phead">
+        <div><h2>캐릭터 · 시나리오 · MULTI 수</h2><p class="sub">매일 공개된 개수 · 선이 계단처럼 바뀌는 날 = 추가/제외 · 시나리오는 11/21부터 집계</p></div>
+      </div>
+      <div class="counts" id="counts"></div>
+    </article>
     <article class="panel items-panel">
       <div class="phead">
-        <div><h2>캐릭터·작품별 추이</h2><p class="sub" id="items-sub"></p></div>
+        <div><h2>캐릭터·MULTI별 추이</h2><p class="sub" id="items-sub"></p></div>
         <div class="ctrls">
           <div class="seg" id="imetric" role="group" aria-label="지표">
             <button data-v="chat" class="on">Chat</button>
@@ -55,11 +61,11 @@
     <section class="panel table-panel">
       <div class="table-head">
         <div class="table-title">
-          <h2>작품별 카운터</h2>
+          <h2>캐릭터·MULTI별 카운터</h2>
           <select id="date" aria-label="수집일"></select>
         </div>
         <div class="table-tools">
-          <input id="search" type="search" placeholder="작품 이름 검색">
+          <input id="search" type="search" placeholder="이름 검색">
           <button id="csv" class="ghost">CSV 저장</button>
         </div>
       </div>
