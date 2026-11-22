@@ -17,10 +17,9 @@ const state = {
   date: null,
   sort: null,
   data: {},
-  imetric: "chat", // 국가 탭 캐릭터·작품별 그래프 지표
   imode: "abs",    // abs 누적 / gain 일 순증 / share 순증 점유율
-  kmetric: "view", // 국가 탭 캐릭터 vs MULTI 합계 그래프 지표
-  kmode: "abs",
+  kmode: "abs",    // 국가 탭 캐릭터 vs MULTI 합계 그래프 (Chat)
+  tmode: "abs",    // 일본 탭 캐릭터 유형별 그래프 (Chat)
 };
 // 일본·대만·미국 이름 옆 괄호: 캐릭터는 같은 번호의 한국판 이름, 한국판이 없으면 번역(ko.js)
 let krNameCache = null;
@@ -267,6 +266,11 @@ const TYPE_DEFS = [
 ];
 const TYPED_MARKETS = ["jp"];
 let typeCache = null;
+function typeKnown(days) {
+  const known = {};
+  for (const day of days) for (const [k, v] of Object.entries(day.items)) if (v[4]) known[k] = v[4];
+  return known;
+}
 function dayTypes(market, days) {
   const id = market + "|" + days.length + "|" + days.at(-1).captured_at;
   if (typeCache?.id === id) return typeCache.rows;
@@ -359,6 +363,7 @@ function renderMarket() {
   $("#date").innerHTML = dates.slice().reverse().map(x => `<option ${x === state.date ? "selected" : ""}>${x}</option>`).join("");
   drawCounts();
   drawKinds();
+  drawTypes();
   drawItems();
   renderTable();
 }
@@ -443,7 +448,7 @@ function lineChart(el, days, series, o) {
     const title = { abs: `${ml} 누적`, gain: `${ml} 일 순증(24h 환산)`, share: `${ml} 순증 점유율` }[mode];
     tip.innerHTML = `<b>${days[i].date} · ${title}</b>` + (rows.length
       ? rows.map(q => `<div class="row"><span><i style="background:${q.se.color}"></i>${esc(q.se.name)}</span><span>${unit(q.v)}` +
-          (q.se.scen && q.se.scen[i] != null ? `<small class="sc">시나리오 ${q.se.scen[i]}개</small>` : "") + `</span></div>`).join("")
+          (q.se.note ? q.se.note(i) : "") + `</span></div>`).join("")
       : `<div class="row sub"><span>표시할 값이 없습니다</span><span></span></div>`);
     tip.hidden = false;
     tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px";
@@ -453,40 +458,71 @@ function lineChart(el, days, series, o) {
   return true;
 }
 
-// ───────── 국가 탭: 캐릭터 vs MULTI 합계 ─────────
-function kindTotal(day, kind, mi) {
-  let t = 0;
-  for (const [k, v] of Object.entries(day.items)) if (k.startsWith(kind + ":")) t += v[mi];
-  return t;
-}
-function drawKinds() {
-  const el = $("#plot-kinds"), days = state.data[state.market].days;
-  const mi = state.kmetric === "view" ? 1 : 2, mode = state.kmode, ml = state.kmetric === "view" ? "View" : "Chat";
-  if (!days.length) { el.innerHTML = `<div class="empty">아직 수집된 데이터가 없습니다</div>`; $("#kinds-legend").innerHTML = ""; return; }
-  const tot = days.map(day => ({ character: kindTotal(day, "character", mi), content: kindTotal(day, "content", mi) }));
-  const val = (kind, i) => {
-    if (mode === "abs") return tot[i][kind];
+// ───────── 국가 탭: 그룹별 Chat 합계(캐릭터 vs MULTI, 일본 유형별) + 보조 지표 1개당 평균 ─────────
+// groups = [{ name, color, has(key, item) }] → 선 series(합계 또는 순증·점유율) + 날짜별 평균·개수
+function groupSeries(days, groups, mode) {
+  const tot = days.map(day => groups.map(g => {
+    let t = 0, c = 0;
+    for (const [k, v] of Object.entries(day.items)) if (g.has(k, v)) { t += v[2]; c++; }
+    return { t, c };
+  }));
+  const val = (gi, i) => {
+    if (mode === "abs") return tot[i][gi].t;
     if (i < 1) return null;
     const hours = (new Date(days[i].captured_at) - new Date(days[i - 1].captured_at)) / 3600e3;
     if (!(hours >= MIN_GAP_H)) return null;
-    const g = tot[i][kind] - tot[i - 1][kind];
+    const g = tot[i][gi].t - tot[i - 1][gi].t;
     if (mode === "gain") return Math.round(g * 24 / hours);
-    const all = (tot[i].character - tot[i - 1].character) + (tot[i].content - tot[i - 1].content);
+    const all = tot[i].reduce((a, q, j) => a + q.t - tot[i - 1][j].t, 0);
     return all > 0 ? (g / all) * 100 : null;
   };
-  const series = [
-    { name: "캐릭터", color: css("--c1"), vals: days.map((_, i) => val("character", i)) },
-    { name: "MULTI", color: css("--c2"), vals: days.map((_, i) => val("content", i)) },
-  ];
-  $("#kinds-sub").textContent = `공개된 전체 캐릭터의 ${ml} 합계와 전체 MULTI의 ${ml} 합계`;
-  lineChart(el, days, series, { mode, ml, aria: `캐릭터·MULTI ${ml} 합계` });
-  $("#kinds-legend").innerHTML = series.map(se => `<span><i style="background:${se.color}"></i>${se.name}</span>`).join("");
+  return groups.map((g, gi) => {
+    const avg = days.map((_, i) => (tot[i][gi].c ? tot[i][gi].t / tot[i][gi].c : null));
+    const cnt = days.map((_, i) => tot[i][gi].c);
+    return { name: g.name, color: g.color, unit: g.unit, vals: days.map((_, i) => val(gi, i)), avg, cnt,
+      note: i => (avg[i] == null ? "" : `<small class="sc">평균 ${short(Math.round(avg[i]))} · ${cnt[i]}${g.unit}</small>`) };
+  });
+}
+// 보조 지표 막대: 1개당 평균 누적 Chat(최신 수집 기준)
+function renderAvg(el, series) {
+  const rows = series.map(se => ({ se, a: se.avg.at(-1), c: se.cnt.at(-1) }));
+  const max = Math.max(1, ...rows.map(q => q.a || 0));
+  el.innerHTML = `<div class="scen-title">1개당 평균 Chat <small>누적 Chat ÷ 개수 · 최신 수집 기준 · 날짜별 평균은 그래프에 마우스를 올리면 보여요</small></div>` +
+    rows.map(q => `<div class="scen-row"><span class="scen-name"><i style="background:${q.se.color}"></i>${esc(q.se.name)} <small>${fmt(q.c || 0)}${q.se.unit}</small></span>` +
+      `<span class="scen-bar"><b style="width:${q.a == null ? 0 : (q.a / max) * 100}%;background:${q.se.color}"></b></span>` +
+      `<span class="scen-n">${q.a == null ? "–" : fmt(Math.round(q.a))}</span></div>`).join("");
+}
+function drawGroupPanel(ids, groups, mode, aria) {
+  const days = state.data[state.market].days, el = $(ids.plot);
+  if (!days.length) { el.innerHTML = `<div class="empty">아직 수집된 데이터가 없습니다</div>`; $(ids.legend).innerHTML = ""; $(ids.avg).innerHTML = ""; return; }
+  const series = groupSeries(days, groups, mode);
+  lineChart(el, days, series, { mode, ml: "Chat", aria });
+  $(ids.legend).innerHTML = series.map(se => `<span><i style="background:${se.color}"></i>${esc(se.name)}</span>`).join("");
+  renderAvg($(ids.avg), series);
+}
+function drawKinds() {
+  $("#kinds-sub").textContent = "공개된 전체 캐릭터의 Chat 합계와 전체 MULTI의 Chat 합계 · 아래 막대는 1개당 평균";
+  drawGroupPanel({ plot: "#plot-kinds", legend: "#kinds-legend", avg: "#kinds-avg" }, [
+    { name: "캐릭터", color: css("--c1"), unit: "명", has: k => k.startsWith("character:") },
+    { name: "MULTI", color: css("--c2"), unit: "개", has: k => k.startsWith("content:") },
+  ], state.kmode, "캐릭터·MULTI Chat 합계");
+}
+function drawTypes() {
+  const typed = TYPED_MARKETS.includes(state.market);
+  $("#types-chart").hidden = !typed;
+  if (!typed) return;
+  const days = state.data[state.market].days, known = typeKnown(days);
+  $("#types-sub").textContent = "유형별 캐릭터 Chat 합계 · 아래 막대는 캐릭터 1명당 평균";
+  drawGroupPanel({ plot: "#plot-types", legend: "#types-legend", avg: "#types-avg" },
+    TYPE_DEFS.map(t => ({ name: t.label, color: css(t.color), unit: "명",
+      has: (k, v) => k.startsWith("character:") && (v[4] || known[k] || "source") === t.k })),
+    state.tmode, "캐릭터 유형별 Chat 합계");
 }
 
 // ───────── 국가 탭: 캐릭터별 추이 + 보조 지표 시나리오 수 ─────────
 function drawItems() {
   const el = $("#plot-items"), d = state.data[state.market], days = d.days;
-  const mi = state.imetric === "view" ? 1 : 2, mode = state.imode, ml = state.imetric === "view" ? "View" : "Chat";
+  const mi = 2, mode = state.imode, ml = "Chat";
   if (!days.length) { el.innerHTML = `<div class="empty">아직 수집된 데이터가 없습니다</div>`; $("#items-legend").innerHTML = ""; $("#items-sub").textContent = ""; $("#scen-bars").innerHTML = ""; return; }
   // 선정: 누적 보기는 최신 누적 상위, 순증·점유율 보기는 기간 증가량 상위 (수집이 하루뿐이면 누적 상위). 캐릭터만.
   const last = days.at(-1).items;
@@ -499,6 +535,7 @@ function drawItems() {
   const series = keys.map(k => ({ k, name: koName(state.market, k, last[k][0] || k), color: itemColor(state.market, days, k),
     vals: days.map((_, i) => itemValue(d, i, k, mi, mode)),
     scen: days.map(day => day.items[k]?.[3] ?? null) }));
+  for (const se of series) se.note = i => (se.scen[i] != null ? `<small class="sc">시나리오 ${se.scen[i]}개</small>` : "");
   lineChart(el, days, series, { mode, ml, aria: `캐릭터별 ${ml}` });
   $("#items-legend").innerHTML = series.map(se => `<span><i style="background:${se.color}"></i>${esc(se.name)}</span>`).join("");
   // 보조 지표: 캐릭터별 시나리오 수(최신 수집 기준)
@@ -613,12 +650,12 @@ $("#tabs").addEventListener("click", e => {
   render();
 });
 $("#date").addEventListener("change", e => { state.date = e.target.value; renderTable(); });
-for (const [id, key] of [["#imetric", "imetric"], ["#imode", "imode"], ["#kmetric", "kmetric"], ["#kmode", "kmode"]]) {
+for (const [id, key] of [["#imode", "imode"], ["#kmode", "kmode"], ["#tmode", "tmode"]]) {
   $(id).addEventListener("click", e => {
     const b = e.target.closest("button"); if (!b) return;
     $(id).querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
     state[key] = b.dataset.v;
-    key[0] === "k" ? drawKinds() : drawItems();
+    ({ k: drawKinds, t: drawTypes, i: drawItems })[key[0]]();
   });
 }
 $("#search").addEventListener("input", e => { state.search = e.target.value; renderTable(); });
@@ -641,7 +678,7 @@ $("#csv").addEventListener("click", () => {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 });
 let rt;
-addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => (state.market === "all" ? renderAll() : (drawCounts(), drawKinds(), drawItems())), 150); });
+addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => (state.market === "all" ? renderAll() : (drawCounts(), drawKinds(), drawTypes(), drawItems())), 150); });
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => state.market === "all" && renderAll());
 
 async function refresh() { await loadAll(); render(); }
