@@ -188,3 +188,4 @@ tr.total td { font-weight: 700; background: var(--bg); position: sticky; top: 37
 .scen-bar b { display: block; height: 100%; border-radius: 4px; }
 .scen-n { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-2); }
 .tip .sc { color: var(--muted); font-weight: 400; margin-left: 6px; font-size: 11px; }
+.scen-name small { color: var(--muted); font-size: 11px; }
