@@ -177,3 +177,14 @@ tr.total td { font-weight: 700; background: var(--bg); position: sticky; top: 37
 .types-title { margin: 16px 0 0; font-size: 14px; }
 .counts.types { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 @media (max-width: 960px) { .counts.types { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* 캐릭터·시나리오 추이: 보조 지표 시나리오 수 */
+.scen { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.scen-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.scen-title small { color: var(--muted); font-weight: 400; font-size: 11px; margin-left: 6px; }
+.scen-row { display: grid; grid-template-columns: minmax(120px, 260px) 1fr 48px; align-items: center; gap: 10px; font-size: 12px; padding: 3px 0; }
+.scen-name { display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.scen-name i { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.scen-bar { height: 10px; background: var(--grid); border-radius: 4px; overflow: hidden; }
+.scen-bar b { display: block; height: 100%; border-radius: 4px; }
+.scen-n { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-2); }
+.tip .sc { color: var(--muted); font-weight: 400; margin-left: 6px; font-size: 11px; }
