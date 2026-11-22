@@ -258,10 +258,10 @@ const COUNT_DEFS = [
 ];
 // 일본 캐릭터 유형(수집기가 태그로 분류). 유형 기록이 없는 날은 그 캐릭터의 가장 최근 유형으로 소급합니다.
 const TYPE_DEFS = [
-  { k: "source", label: "원작 기반", desc: "웹툰·웹소설 원작 등 (그 외 전부)", unit: "명", color: "--c1" },
-  { k: "creator", label: "크리에이터", desc: "'クリエーター' 태그", unit: "명", color: "--c4" },
-  { k: "original", label: "탑툰챗 오리지널", desc: "'TOPTOONオリジナル' 태그", unit: "명", color: "--c5" },
-  { k: "live", label: "실사", desc: "'オリジナル実写' 태그 · 버추얼 휴먼", unit: "명", color: "--c6" },
+  { k: "source", label: "원작 기반", desc: "탑툰 웹툰 IP 캐릭터를 일본어로 현지화 · 대부분 한국과 같은 캐릭터", unit: "명", color: "--c1" },
+  { k: "creator", label: "크리에이터", desc: "IP 없이 외부 크리에이터가 만든 가상 캐릭터", unit: "명", color: "--c4" },
+  { k: "original", label: "탑툰챗 오리지널", desc: "IP 없이 탑툰챗이 직접 만든 캐릭터 · 한국판을 가져온 것 + 일본 신규", unit: "명", color: "--c5" },
+  { k: "live", label: "실사", desc: "일본 탑툰챗 오리지널 중 실제 사람처럼 보이는 실사 캐릭터", unit: "명", color: "--c6" },
 ];
 const TYPED_MARKETS = ["jp"];
 let typeCache = null;
