@@ -19,6 +19,8 @@ const state = {
   data: {},
   imetric: "chat", // 국가 탭 캐릭터·작품별 그래프 지표
   imode: "abs",    // abs 누적 / gain 일 순증 / share 순증 점유율
+  kmetric: "view", // 국가 탭 캐릭터 vs MULTI 합계 그래프 지표
+  kmode: "abs",
 };
 // 일본·대만·미국 이름 옆 괄호: 캐릭터는 같은 번호의 한국판 이름, 한국판이 없으면 번역(ko.js)
 let krNameCache = null;
@@ -356,6 +358,7 @@ function renderMarket() {
   if (!state.date || !dates.includes(state.date)) state.date = dates[dates.length - 1] || null;
   $("#date").innerHTML = dates.slice().reverse().map(x => `<option ${x === state.date ? "selected" : ""}>${x}</option>`).join("");
   drawCounts();
+  drawKinds();
   drawItems();
   renderTable();
 }
@@ -375,22 +378,11 @@ function itemValue(d, i, k, mi, mode) {
   return tot > 0 ? (raw / tot) * 100 : null;
 }
 
-function drawItems() {
-  const el = $("#plot-items"), d = state.data[state.market], days = d.days;
-  const mi = state.imetric === "view" ? 1 : 2, mode = state.imode, ml = state.imetric === "view" ? "View" : "Chat";
-  if (!days.length) { el.innerHTML = `<div class="empty">아직 수집된 데이터가 없습니다</div>`; $("#items-legend").innerHTML = ""; $("#items-sub").textContent = ""; return; }
-  // 선정: 누적 보기는 최신 누적 상위, 순증·점유율 보기는 기간 증가량 상위 (수집이 하루뿐이면 누적 상위)
-  const last = days.at(-1).items;
-  const byAbs = mode === "abs" || days.length < 2;
-  const keys = Object.keys(last).sort((a, b) => itemScore(days, b, mi, !byAbs) - itemScore(days, a, mi, !byAbs)).slice(0, TOP_N);
-  $("#items-sub").textContent = byAbs
-    ? `${days.at(-1).date} 기준 ${ml} 누적 상위 ${keys.length}개 · 같은 이름은 어느 보기에서나 같은 색`
-    : `${days[0].date} 이후 ${ml} 증가량 상위 ${keys.length}개 · 같은 이름은 어느 보기에서나 같은 색`;
-  const series = keys.map(k => ({ k, name: koName(state.market, k, last[k][0] || k), color: itemColor(state.market, days, k),
-    vals: days.map((_, i) => itemValue(d, i, k, mi, mode)) }));
+// 여러 선 차트(공통): series = [{ name, color, vals[], scen?[] }]
+function lineChart(el, days, series, o) {
+  const { mode, ml, aria } = o;
   const all = series.flatMap(s => s.vals).filter(v => v != null);
-  if (!all.length) { el.innerHTML = `<div class="empty">순증은 수집이 2일 이상 쌓이면 표시됩니다</div>`; $("#items-legend").innerHTML = ""; return; }
-
+  if (!all.length) { el.innerHTML = `<div class="empty">순증은 수집이 2일 이상 쌓이면 표시됩니다</div>`; return false; }
   const W = el.clientWidth || 800, H = el.clientHeight || 380;
   const pad = { l: 56, r: 76, t: 14, b: 22 };
   const ph = H - pad.t - pad.b, iw = W - pad.l - pad.r;
@@ -400,7 +392,7 @@ function drawItems() {
   const lo = ticks[0], hi = ticks.at(-1);
   const y = v => pad.t + ph - ((v - lo) / (hi - lo || 1)) * ph;
   const lbl = v => (mode === "share" ? `${v.toFixed(0)}%` : short(v));
-  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="캐릭터·MULTI별 ${ml}">`;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${aria}">`;
   svg += `<g class="axis">`;
   const tl = ticks.map(t => (mode === "share" ? `${t}%` : short(t))), lab = new Set(tl).size < tl.length ? ticks.map(fmt) : tl;
   ticks.forEach((t, ti) => {
@@ -418,6 +410,15 @@ function drawItems() {
     let path = "", pen = false;
     pts.forEach(q => { if (!q) { pen = false; return; } path += (pen ? "L" : "M") + q[0].toFixed(1) + "," + q[1].toFixed(1); pen = true; });
     if (path.includes("L")) svg += `<path d="${path}" fill="none" stroke="${se.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    // 보조 지표: 시나리오가 늘어난 날은 선 위에 빈 원으로 표시
+    if (se.scen) {
+      let prev = null;
+      se.scen.forEach((c, i) => {
+        if (c == null) return;
+        if (prev != null && c > prev && pts[i]) svg += `<circle cx="${pts[i][0]}" cy="${pts[i][1]}" r="5.5" fill="var(--surface)" stroke="${se.color}" stroke-width="2"/>`;
+        prev = c;
+      });
+    }
     const li = se.vals.map((v, i) => (v == null ? -1 : i)).filter(i => i >= 0).pop();
     if (li == null || li < 0) continue;
     svg += `<circle cx="${x(li)}" cy="${y(se.vals[li])}" r="3" fill="${se.color}"/>`;
@@ -441,14 +442,74 @@ function drawItems() {
     const rows = series.map(se => ({ se, v: se.vals[i] })).filter(q => q.v != null).sort((a, b) => b.v - a.v);
     const title = { abs: `${ml} 누적`, gain: `${ml} 일 순증(24h 환산)`, share: `${ml} 순증 점유율` }[mode];
     tip.innerHTML = `<b>${days[i].date} · ${title}</b>` + (rows.length
-      ? rows.map(q => `<div class="row"><span><i style="background:${q.se.color}"></i>${esc(q.se.name)}</span><span>${unit(q.v)}</span></div>`).join("")
+      ? rows.map(q => `<div class="row"><span><i style="background:${q.se.color}"></i>${esc(q.se.name)}</span><span>${unit(q.v)}` +
+          (q.se.scen && q.se.scen[i] != null ? `<small class="sc">시나리오 ${q.se.scen[i]}개</small>` : "") + `</span></div>`).join("")
       : `<div class="row sub"><span>표시할 값이 없습니다</span><span></span></div>`);
     tip.hidden = false;
     tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px";
     tip.style.top = e.clientY + 14 + "px";
   });
   s.querySelector(".hit").addEventListener("mouseleave", () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); });
+  return true;
+}
+
+// ───────── 국가 탭: 캐릭터 vs MULTI 합계 ─────────
+function kindTotal(day, kind, mi) {
+  let t = 0;
+  for (const [k, v] of Object.entries(day.items)) if (k.startsWith(kind + ":")) t += v[mi];
+  return t;
+}
+function drawKinds() {
+  const el = $("#plot-kinds"), days = state.data[state.market].days;
+  const mi = state.kmetric === "view" ? 1 : 2, mode = state.kmode, ml = state.kmetric === "view" ? "View" : "Chat";
+  if (!days.length) { el.innerHTML = `<div class="empty">아직 수집된 데이터가 없습니다</div>`; $("#kinds-legend").innerHTML = ""; return; }
+  const tot = days.map(day => ({ character: kindTotal(day, "character", mi), content: kindTotal(day, "content", mi) }));
+  const val = (kind, i) => {
+    if (mode === "abs") return tot[i][kind];
+    if (i < 1) return null;
+    const hours = (new Date(days[i].captured_at) - new Date(days[i - 1].captured_at)) / 3600e3;
+    if (!(hours >= MIN_GAP_H)) return null;
+    const g = tot[i][kind] - tot[i - 1][kind];
+    if (mode === "gain") return Math.round(g * 24 / hours);
+    const all = (tot[i].character - tot[i - 1].character) + (tot[i].content - tot[i - 1].content);
+    return all > 0 ? (g / all) * 100 : null;
+  };
+  const series = [
+    { name: "캐릭터", color: css("--c1"), vals: days.map((_, i) => val("character", i)) },
+    { name: "MULTI", color: css("--c2"), vals: days.map((_, i) => val("content", i)) },
+  ];
+  $("#kinds-sub").textContent = `공개된 전체 캐릭터의 ${ml} 합계와 전체 MULTI의 ${ml} 합계`;
+  lineChart(el, days, series, { mode, ml, aria: `캐릭터·MULTI ${ml} 합계` });
+  $("#kinds-legend").innerHTML = series.map(se => `<span><i style="background:${se.color}"></i>${se.name}</span>`).join("");
+}
+
+// ───────── 국가 탭: 캐릭터별 추이 + 보조 지표 시나리오 수 ─────────
+function drawItems() {
+  const el = $("#plot-items"), d = state.data[state.market], days = d.days;
+  const mi = state.imetric === "view" ? 1 : 2, mode = state.imode, ml = state.imetric === "view" ? "View" : "Chat";
+  if (!days.length) { el.innerHTML = `<div class="empty">아직 수집된 데이터가 없습니다</div>`; $("#items-legend").innerHTML = ""; $("#items-sub").textContent = ""; $("#scen-bars").innerHTML = ""; return; }
+  // 선정: 누적 보기는 최신 누적 상위, 순증·점유율 보기는 기간 증가량 상위 (수집이 하루뿐이면 누적 상위). 캐릭터만.
+  const last = days.at(-1).items;
+  const byAbs = mode === "abs" || days.length < 2;
+  const keys = Object.keys(last).filter(k => k.startsWith("character:"))
+    .sort((a, b) => itemScore(days, b, mi, !byAbs) - itemScore(days, a, mi, !byAbs)).slice(0, TOP_N);
+  $("#items-sub").textContent = byAbs
+    ? `${days.at(-1).date} 기준 캐릭터 ${ml} 누적 상위 ${keys.length}명 · 같은 이름은 어느 보기에서나 같은 색`
+    : `${days[0].date} 이후 캐릭터 ${ml} 증가량 상위 ${keys.length}명 · 같은 이름은 어느 보기에서나 같은 색`;
+  const series = keys.map(k => ({ k, name: koName(state.market, k, last[k][0] || k), color: itemColor(state.market, days, k),
+    vals: days.map((_, i) => itemValue(d, i, k, mi, mode)),
+    scen: days.map(day => day.items[k]?.[3] ?? null) }));
+  lineChart(el, days, series, { mode, ml, aria: `캐릭터별 ${ml}` });
   $("#items-legend").innerHTML = series.map(se => `<span><i style="background:${se.color}"></i>${esc(se.name)}</span>`).join("");
+  // 보조 지표: 캐릭터별 시나리오 수(최신 수집 기준)
+  const sc = series.map(se => ({ se, n: [...se.scen].reverse().find(v => v != null) ?? null }));
+  const max = Math.max(1, ...sc.map(q => q.n || 0));
+  $("#scen-bars").innerHTML = sc.some(q => q.n != null)
+    ? `<div class="scen-title">시나리오 수 <small>최신 수집 기준 · 선 위의 빈 원 = 시나리오가 추가된 날</small></div>` +
+      sc.map(q => `<div class="scen-row"><span class="scen-name"><i style="background:${q.se.color}"></i>${esc(q.se.name)}</span>` +
+        `<span class="scen-bar"><b style="width:${q.n == null ? 0 : (q.n / max) * 100}%;background:${q.se.color}"></b></span>` +
+        `<span class="scen-n">${q.n == null ? "–" : q.n + "개"}</span></div>`).join("")
+    : `<div class="scen-title">시나리오 수 <small>다음 수집부터 집계</small></div>`;
 }
 
 function currentRows() {
@@ -552,12 +613,12 @@ $("#tabs").addEventListener("click", e => {
   render();
 });
 $("#date").addEventListener("change", e => { state.date = e.target.value; renderTable(); });
-for (const [id, key] of [["#imetric", "imetric"], ["#imode", "imode"]]) {
+for (const [id, key] of [["#imetric", "imetric"], ["#imode", "imode"], ["#kmetric", "kmetric"], ["#kmode", "kmode"]]) {
   $(id).addEventListener("click", e => {
     const b = e.target.closest("button"); if (!b) return;
     $(id).querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
     state[key] = b.dataset.v;
-    drawItems();
+    key[0] === "k" ? drawKinds() : drawItems();
   });
 }
 $("#search").addEventListener("input", e => { state.search = e.target.value; renderTable(); });
@@ -580,7 +641,7 @@ $("#csv").addEventListener("click", () => {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 });
 let rt;
-addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => (state.market === "all" ? renderAll() : (drawCounts(), drawItems())), 150); });
+addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => (state.market === "all" ? renderAll() : (drawCounts(), drawKinds(), drawItems())), 150); });
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => state.market === "all" && renderAll());
 
 async function refresh() { await loadAll(); render(); }
