@@ -388,14 +388,23 @@ function lineChart(el, days, series, o) {
   const { mode, ml, aria } = o;
   const all = series.flatMap(s => s.vals).filter(v => v != null);
   if (!all.length) { el.innerHTML = `<div class="empty">순증은 수집이 2일 이상 쌓이면 표시됩니다</div>`; return false; }
+  // 보조 축: axis:"right" 인 선은 오른쪽 축(자기 범위)으로 그려 규모가 달라도 각자의 추이가 보이게 함(점유율 보기는 한 축)
+  const dual = mode !== "share" && series.some(s => s.axis === "right") && series.some(s => s.axis !== "right");
   const W = el.clientWidth || 800, H = el.clientHeight || 380;
-  const pad = { l: 56, r: 76, t: 14, b: 22 };
+  const pad = { l: 56, r: dual ? 124 : 76, t: 14, b: 22 };
   const ph = H - pad.t - pad.b, iw = W - pad.l - pad.r;
   const n = days.length, step = n > 1 ? iw / (n - 1) : 0;
   const x = i => pad.l + (n > 1 ? step * i : iw / 2);
-  const ticks = mode === "abs" ? niceTicks(Math.min(...all), Math.max(...all)) : niceTicks(Math.min(0, ...all), Math.max(0, ...all, 1));
-  const lo = ticks[0], hi = ticks.at(-1);
-  const y = v => pad.t + ph - ((v - lo) / (hi - lo || 1)) * ph;
+  const scale = vals => {
+    const ticks = mode === "abs" ? niceTicks(Math.min(...vals), Math.max(...vals)) : niceTicks(Math.min(0, ...vals), Math.max(0, ...vals, 1));
+    const lo = ticks[0], hi = ticks.at(-1);
+    return { ticks, y: v => pad.t + ph - ((v - lo) / (hi - lo || 1)) * ph };
+  };
+  const vOf = right => series.filter(s => (s.axis === "right") === right).flatMap(s => s.vals).filter(v => v != null);
+  const L = dual ? scale(vOf(false).length ? vOf(false) : all) : scale(all);
+  const Rt = dual && vOf(true).length ? scale(vOf(true)) : L;
+  const ticks = L.ticks, y = L.y;
+  const yOf = se => (dual && se.axis === "right" ? Rt.y : L.y);
   const lbl = v => (mode === "share" ? `${v.toFixed(0)}%` : short(v));
   let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${aria}">`;
   svg += `<g class="axis">`;
@@ -405,13 +414,20 @@ function lineChart(el, days, series, o) {
     svg += `<text x="${pad.l - 6}" y="${y(t) + 4}" text-anchor="end">${lab[ti]}</text>`;
   });
   if (mode !== "abs") svg += `<line class="baseline" x1="${pad.l}" x2="${W - pad.r}" y1="${y(0)}" y2="${y(0)}"/>`;
+  if (dual) {
+    const rc = series.find(s => s.axis === "right").color;
+    const rl = Rt.ticks.map(t => short(t)), rlab = new Set(rl).size < rl.length ? Rt.ticks.map(fmt) : rl;
+    Rt.ticks.forEach((t, ti) => { svg += `<text x="${W - pad.r + 6}" y="${Rt.y(t) + 4}" text-anchor="start" style="fill:${rc}">${rlab[ti]}</text>`; });
+    svg += `<line x1="${W - pad.r}" x2="${W - pad.r}" y1="${pad.t}" y2="${H - pad.b}" stroke="${rc}" stroke-opacity=".5"/>`;
+  }
   const every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(iw / 70))));
   const multiYear = days[0].date.slice(0, 4) !== days.at(-1).date.slice(0, 4);
   days.forEach((dd, i) => { if (i % every === 0 || i === n - 1) svg += `<text x="${x(i)}" y="${H - 4}" text-anchor="middle">${mdy(dd.date, multiYear)}</text>`; });
   svg += `</g>`;
   const labels = [];
   for (const se of series) {
-    const pts = se.vals.map((v, i) => (v == null ? null : [x(i), y(v)]));
+    const ys = yOf(se);
+    const pts = se.vals.map((v, i) => (v == null ? null : [x(i), ys(v)]));
     let path = "", pen = false;
     pts.forEach(q => { if (!q) { pen = false; return; } path += (pen ? "L" : "M") + q[0].toFixed(1) + "," + q[1].toFixed(1); pen = true; });
     if (path.includes("L")) svg += `<path d="${path}" fill="none" stroke="${se.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
@@ -426,14 +442,14 @@ function lineChart(el, days, series, o) {
     }
     const li = se.vals.map((v, i) => (v == null ? -1 : i)).filter(i => i >= 0).pop();
     if (li == null || li < 0) continue;
-    svg += `<circle cx="${x(li)}" cy="${y(se.vals[li])}" r="3" fill="${se.color}"/>`;
-    labels.push({ y: y(se.vals[li]), text: lbl(se.vals[li]), color: se.color });
+    svg += `<circle cx="${x(li)}" cy="${ys(se.vals[li])}" r="3" fill="${se.color}"/>`;
+    labels.push({ y: ys(se.vals[li]), text: lbl(se.vals[li]), color: se.color });
   }
   labels.sort((a, b) => a.y - b.y);
   for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 13) labels[i].y = labels[i - 1].y + 13;
   const maxY = H - pad.b - 2;
   if (labels.length && labels.at(-1).y > maxY) { labels.at(-1).y = maxY; for (let i = labels.length - 2; i >= 0; i--) labels[i].y = Math.min(labels[i].y, labels[i + 1].y - 13); }
-  for (const l of labels) svg += `<text class="endlabel" x="${W - pad.r + 8}" y="${l.y + 4}" style="fill:${l.color}">${l.text}</text>`;
+  for (const l of labels) svg += `<text class="endlabel" x="${W - pad.r + (dual ? 52 : 8)}" y="${l.y + 4}" style="fill:${l.color}">${l.text}</text>`;
   svg += `<line class="cross" x1="0" x2="0" y1="${pad.t}" y2="${H - pad.b}" visibility="hidden"/>`;
   svg += `<rect class="hit" x="${pad.l - step / 2}" y="${pad.t}" width="${iw + step}" height="${ph}"/></svg>`;
   el.innerHTML = svg;
@@ -479,7 +495,7 @@ function groupSeries(days, groups, mode) {
   return groups.map((g, gi) => {
     const avg = days.map((_, i) => (tot[i][gi].c ? tot[i][gi].t / tot[i][gi].c : null));
     const cnt = days.map((_, i) => tot[i][gi].c);
-    return { name: g.name, color: g.color, unit: g.unit, vals: days.map((_, i) => val(gi, i)), avg, cnt,
+    return { name: g.name, color: g.color, unit: g.unit, axis: g.axis, vals: days.map((_, i) => val(gi, i)), avg, cnt,
       note: i => (avg[i] == null ? "" : `<small class="sc">평균 ${short(Math.round(avg[i]))} · ${cnt[i]}${g.unit}</small>`) };
   });
 }
@@ -497,14 +513,16 @@ function drawGroupPanel(ids, groups, mode, aria) {
   if (!days.length) { el.innerHTML = `<div class="empty">아직 수집된 데이터가 없습니다</div>`; $(ids.legend).innerHTML = ""; $(ids.avg).innerHTML = ""; return; }
   const series = groupSeries(days, groups, mode);
   lineChart(el, days, series, { mode, ml: "Chat", aria });
-  $(ids.legend).innerHTML = series.map(se => `<span><i style="background:${se.color}"></i>${esc(se.name)}</span>`).join("");
+  const dual = mode !== "share" && series.some(se => se.axis === "right");
+  $(ids.legend).innerHTML = series.map(se => `<span><i style="background:${se.color}"></i>${esc(se.name)}` +
+    (dual ? ` <small>${se.axis === "right" ? "오른쪽 축" : "왼쪽 축"}</small>` : "") + `</span>`).join("");
   renderAvg($(ids.avg), series);
 }
 function drawKinds() {
-  $("#kinds-sub").textContent = "공개된 전체 캐릭터의 Chat 합계와 전체 MULTI의 Chat 합계 · 아래 막대는 1개당 평균";
+  $("#kinds-sub").textContent = "전체 캐릭터 Chat 합계(왼쪽 축)와 전체 MULTI Chat 합계(오른쪽 축) · 축을 따로 써서 각자의 추이를 보여줌 · 아래 막대는 1개당 평균";
   drawGroupPanel({ plot: "#plot-kinds", legend: "#kinds-legend", avg: "#kinds-avg" }, [
     { name: "캐릭터", color: css("--c1"), unit: "명", has: k => k.startsWith("character:") },
-    { name: "MULTI", color: css("--c2"), unit: "개", has: k => k.startsWith("content:") },
+    { name: "MULTI", color: css("--c2"), unit: "개", axis: "right", has: k => k.startsWith("content:") },
   ], state.kmode, "캐릭터·MULTI Chat 합계");
 }
 function drawTypes() {
@@ -512,9 +530,9 @@ function drawTypes() {
   $("#types-chart").hidden = !typed;
   if (!typed) return;
   const days = state.data[state.market].days, known = typeKnown(days);
-  $("#types-sub").textContent = "유형별 캐릭터 Chat 합계 · 아래 막대는 캐릭터 1명당 평균";
+  $("#types-sub").textContent = "유형별 캐릭터 Chat 합계 · 원작 기반은 오른쪽 축, 나머지 셋은 왼쪽 축 · 아래 막대는 캐릭터 1명당 평균";
   drawGroupPanel({ plot: "#plot-types", legend: "#types-legend", avg: "#types-avg" },
-    TYPE_DEFS.map(t => ({ name: t.label, color: css(t.color), unit: "명",
+    TYPE_DEFS.map(t => ({ name: t.label, color: css(t.color), unit: "명", axis: t.k === "source" ? "right" : "left",
       has: (k, v) => k.startsWith("character:") && (v[4] || known[k] || "source") === t.k })),
     state.tmode, "캐릭터 유형별 Chat 합계");
 }
